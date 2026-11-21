@@ -191,7 +191,9 @@ async function run(fastFs: string | undefined): Promise<{ main: Body[]; spec: Bo
   await until((m) => m.type === 'taskRestored' && m['taskId'] === undefined)
   const before = inbox.length
   await post({ type: 'openTask', id: tasks.tasks[0]!.id })
-  const reopened = await until((m) => m.type === 'strategies' && m['active'] !== undefined, before)
+  // The reopened chat's own update, told by what it carries: the new chat keeps the strategy too (+ carries it), so its
+  // update - with no exchanges yet - may arrive after this point and must not be taken for the reopened chat's.
+  const reopened = await until((m) => m.type === 'strategies' && m['active'] !== undefined && Array.isArray(m['exchanges']) && (m['exchanges'] as unknown[]).length > 0, before)
   return { main, spec, inbox, reopened }
 }
 
@@ -212,6 +214,10 @@ function expectStrategyHeld(result: Awaited<ReturnType<typeof run>>): void {
   expect(testerAsk).toContain('CONDITION: MET')
   expect(testerAsk).toContain('From Programmer you are given, as agreed: the changed functions and why')
   expect(testerAsk).toContain('read-only')
+  // The programmer's answer reached the tester directly, not through the main agent's question.
+  expect(testerAsk).toContain('Handed over from Programmer')
+  expect(testerAsk).toContain("Changed round() to banker's rounding.")
+  expect(testerAsk).toContain('Summary for the main agent')
   const programmerAsk = asked.find((q) => q.includes('Fix the rounding in invoice totals.'))!
   expect(programmerAsk).toContain('As agreed, it must contain: the changed functions and why')
   expect(programmerAsk).toContain('Keep changes minimal.')
@@ -235,7 +241,7 @@ function expectStrategyHeld(result: Awaited<ReturnType<typeof run>>): void {
   expect(toolResults[5]).toContain('REFUSED')
 
   // The window's view: the progress, and every exchange including the refusal.
-  const latest = [...inbox].reverse().find((m) => m.type === 'strategies' && Array.isArray(m['exchanges']))! as unknown as {
+  const latest = [...inbox].reverse().find((m) => m.type === 'strategies' && Array.isArray(m['exchanges']) && (m['exchanges'] as unknown[]).length > 0)! as unknown as {
     progress: Record<string, { rounds: number; met?: boolean }>
     exchanges: { role: string; refused?: string }[]
   }

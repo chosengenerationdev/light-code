@@ -49,6 +49,17 @@ export class ThinkTagSplitter {
   private inside = false
   /** A partial tag held back until the next chunk says what it is. */
   private pending = ''
+  private readonly open: string
+  private readonly close: string
+
+  /**
+   * `think` for Qwen and friends (the default, unchanged). `thought` for Gemini, whose OpenAI-compatible
+   * endpoint wraps the thoughts it was asked to show in `<thought>` tags.
+   */
+  constructor(tag: 'think' | 'thought' = 'think') {
+    this.open = tag === 'think' ? OPEN : `<${tag}>`
+    this.close = tag === 'think' ? CLOSE : `</${tag}>`
+  }
 
   push(chunk: string): ThinkSplit {
     let text = ''
@@ -57,7 +68,7 @@ export class ThinkTagSplitter {
     this.pending = ''
 
     for (;;) {
-      const marker = this.inside ? CLOSE : OPEN
+      const marker = this.inside ? this.close : this.open
       const at = buffer.indexOf(marker)
 
       if (at !== -1) {

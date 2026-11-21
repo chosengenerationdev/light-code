@@ -8,7 +8,7 @@ const paramsSchema = z.object({
   role: z
     .string()
     .describe(
-      `Which specialist to ask: ${AGENT_ROLES.join(', ')}. Only the ones assigned in Settings → Agents can answer.`,
+      `Which specialist to ask: ${AGENT_ROLES.join(', ')}, or a custom role from Settings → Agents by its id. Only the ones assigned there can answer.`,
     ),
   question: z
     .string()
@@ -84,13 +84,19 @@ export function createAskAgentTool(options: AskAgentOptions): Tool<AskAgentParam
 
     async execute(params, context): Promise<ToolResult> {
       const team = options.agents()
-      const role = params.role.trim().toLowerCase()
+      /*
+       * A custom role is as much a role as a built-in one. This checked the five built-in ids only, so a role made in
+       * Settings → Agents was refused as "no such role" however it was assigned - reported as strategies not working
+       * with custom roles. The team is the list of roles on this machine, so it decides; the role may be named by its
+       * id or by its name, since the strategy and the roster show the name.
+       */
+      const agent = find(team, params.role)
+      const role = agent?.role ?? params.role.trim().toLowerCase()
 
-      if (!isAgentRole(role)) {
+      if (agent === undefined && !isAgentRole(role)) {
         return { content: unknownRole(role, team), isError: true }
       }
 
-      const agent = find(team, role)
       if (agent === undefined) {
         return {
           content:
@@ -136,9 +142,11 @@ export function createAskAgentTool(options: AskAgentOptions): Tool<AskAgentParam
   }
 }
 
+/** The role asked for, by its id or its name: "security-reviewer", "Security Reviewer" and "security reviewer" alike. */
 function find(team: readonly ResolvedAgent[], role: string): ResolvedAgent | undefined {
-  const wanted = role.trim().toLowerCase()
-  return team.find((agent) => agent.role === wanted)
+  const squash = (text: string): string => text.trim().toLowerCase().replace(/[\s_-]+/g, '-')
+  const wanted = squash(role)
+  return team.find((agent) => agent.role === wanted) ?? team.find((agent) => squash(agent.name) === wanted)
 }
 
 /**
@@ -148,7 +156,8 @@ function find(team: readonly ResolvedAgent[], role: string): ResolvedAgent | und
  * the round trip is not wasted.
  */
 function unknownRole(role: string, team: readonly ResolvedAgent[]): string {
-  return `There is no "${role}" role. The roles are: ${AGENT_ROLES.join(', ')}. ${describeTeam(team)}`
+  const roles = [...new Set([...AGENT_ROLES, ...team.map((agent) => agent.role)])]
+  return `There is no "${role}" role. The roles are: ${roles.join(', ')}. ${describeTeam(team)}`
 }
 
 function describeTeam(team: readonly ResolvedAgent[]): string {

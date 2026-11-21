@@ -46,13 +46,28 @@ export const formFieldSchema = z.object({
   /** Prefills the control. A good default is the difference between a form and an interrogation. */
   defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional(),
   multiline: z.boolean().optional().describe('For `string` and `list`: renders a text area rather than a single line.'),
+  /**
+   * A password or token: a hidden box. Its value is never given to the model - `ask_user_form` reports only
+   * whether one was entered. Host-side tools that store credentials (`devops_setup`) read it and put it in
+   * secret storage. Invariant 7, applied to a form the model wrote.
+   */
+  secret: z.boolean().optional().describe('For `string`: a password box. The value is NOT returned to you, only whether it was entered - use devops_setup to store credentials.'),
 })
 export type FormField = z.infer<typeof formFieldSchema>
+
+/** The answers as the model may see them: a secret field says only whether it was filled in. */
+export function withoutSecrets(fields: readonly FormField[], values: Record<string, FormValue>): Record<string, FormValue> {
+  const shown: Record<string, FormValue> = { ...values }
+  for (const field of fields) {
+    if (field.secret === true && field.name in shown) shown[field.name] = String(shown[field.name] ?? '') === '' ? '(not entered)' : '(entered - not shown)'
+  }
+  return shown
+}
 
 const paramsSchema = z.object({
   title: z.string().min(1).describe('What this form is for, in a few words.'),
   description: z.string().optional().describe('Optional sentence above the fields.'),
-  fields: z.array(formFieldSchema).min(1).max(20),
+  fields: z.array(formFieldSchema).min(1).max(20).describe("The questions, in order: each with a key (the answer's name), a label and a type."),
 })
 export type AskUserFormParams = z.infer<typeof paramsSchema>
 
@@ -121,7 +136,7 @@ export function createAskUserFormTool(): Tool<AskUserFormParams> {
       if (!answer.submitted) {
         return { content: 'The user dismissed the form without answering. Ask in plain text instead, or continue without it.' }
       }
-      return { content: JSON.stringify(answer.values, null, 2) }
+      return { content: JSON.stringify(withoutSecrets(params.fields, answer.values), null, 2) }
     },
   }
 }

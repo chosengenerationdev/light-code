@@ -102,10 +102,12 @@ export class ObserverAgent {
     this.launch(undefined)
   }
 
-  send(event: ObservedEvent): void {
+  /** `quiet`: the decision model's first pass was sure of this step - kept in context, reviewed with the next one. */
+  send(event: ObservedEvent, quiet = false): void {
     if (this.stopped) return
-    if (!this.write({ type: 'event', event })) {
-      this.buffered.push(event)
+    const sent = quiet ? ({ ...event, quiet: true } as unknown as ObservedEvent) : event
+    if (!this.write({ type: 'event', event: sent })) {
+      this.buffered.push(sent)
       if (this.buffered.length > MAX_BUFFERED) this.buffered.shift()
     }
   }

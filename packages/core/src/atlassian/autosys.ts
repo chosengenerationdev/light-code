@@ -23,6 +23,22 @@ import {
   type JobEvent,
   type PastRun,
 } from './autosysRuns.js'
+import {
+  clockOfMinute,
+  describeTrace,
+  durationStats,
+  etaFor,
+  expectedStartFromDefinitions,
+  formatDuration,
+  localTime,
+  localZone,
+  ownStarts,
+  runDurations,
+  timeOfDayStats,
+  tracePredecessors,
+  type DurationStats,
+  type PredecessorSource,
+} from './autosysInsight.js'
 
 /**
  * AutoSys Workload Automation, through its REST web services (AEWS).
@@ -235,6 +251,72 @@ export function pagingNote(value: unknown, returned: number, what: string): stri
     `AutoSys answered ${String(returned)} ${what}${total !== undefined ? ` of ${String(total)}` : ''} - it pages its answers, so some are missing. ` +
     'Add its page-size parameter to the address (config:autosys paths, e.g. "/job-run-info?filter={filter:name}&limit=1000" - the name of the ' +
     'parameter is in the server\'s API documentation or the office wiki); autosys_check_addresses shows what each address answers.'
+  )
+}
+
+/** The name a key is compared under: case, `_` and `-` ignored, so `box_name`, `boxName` and `BOX-NAME` are one. */
+const squash = (key: string): string => key.toLowerCase().replace(/[_-]/g, '')
+
+/** Text fields a server may return a whole JIL definition in. */
+const JIL_TEXT_FIELDS = ['jil', 'definition', 'text', 'raw', 'jobdefinition', 'source']
+
+/**
+ * A definition attribute wherever the server puts it - asked for after the dependency tools found nothing for a job
+ * that has dependencies: under any spelling (`condition`, `Condition`, `jobCondition`), one level down (a definition
+ * wrapped in `job` or `attributes`), or as a line of raw JIL text (`condition: s(A)`). The first match wins.
+ */
+function definitionValue(definition: Record<string, unknown>, names: readonly string[]): string | undefined {
+  const wanted = new Set(names.map(squash))
+  const scalar = (value: unknown): string | undefined => {
+    if (value === undefined || value === null || value === '') return undefined
+    if (Array.isArray(value)) return value.length === 0 ? undefined : value.map(String).join(' & ')
+    return typeof value === 'object' ? undefined : String(value)
+  }
+  const look = (record: Record<string, unknown>): string | undefined => {
+    for (const [key, value] of Object.entries(record)) if (wanted.has(squash(key))) {
+      const found = scalar(value)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  const top = look(definition)
+  if (top !== undefined) return top
+  for (const value of Object.values(definition)) {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      const nested = look(value as Record<string, unknown>)
+      if (nested !== undefined) return nested
+    }
+  }
+  for (const [key, value] of Object.entries(definition)) {
+    if (!JIL_TEXT_FIELDS.includes(squash(key)) || typeof value !== 'string') continue
+    for (const line of value.split(/\r?\n/)) {
+      const match = /^\s*([A-Za-z_]+)\s*:\s*(.+?)\s*$/.exec(line)
+      if (match !== null && wanted.has(squash(match[1] ?? ''))) return match[2]?.replace(/^"(.*)"$/, '$1')
+    }
+  }
+  return undefined
+}
+
+/** A job's starting condition, wherever its definition holds it. */
+export function definitionCondition(definition: Record<string, unknown>): string | undefined {
+  return definitionValue(definition, ['condition', 'conditions', 'jobCondition', 'startCondition', 'startingCondition'])
+}
+
+/** The box a job sits in, wherever its definition holds it. */
+export function definitionBox(definition: Record<string, unknown>): string | undefined {
+  return definitionValue(definition, ['boxName', 'box', 'parentBox', 'box_name'])
+}
+
+/**
+ * Said when a definition holds neither: which fields the server did return, so "it has no dependencies" is never
+ * reported for a job whose server simply did not send them.
+ */
+export function noDependencyFieldsNote(name: string, definition: Record<string, unknown>): string {
+  const keys = Object.keys(definition).slice(0, 40)
+  return (
+    `The definition AutoSys returned for ${name} has no condition or box field (it returned: ${keys.join(', ') || 'nothing'}). ` +
+    `If ${name} does depend on other jobs, this server's job address does not return its condition - point config:autosys ` +
+    'paths.job at an address that returns the full definition (autosys_check_addresses tries the usual ones, or the office wiki names it).'
   )
 }
 
@@ -815,7 +897,7 @@ export function createAutosysJobTool(options: AutosysToolOptions): Tool<z.infer<
             )
           } else {
             const type = field(definition, 'jobType', 'job_type', 'type')
-            const box = field(definition, 'boxName', 'box_name')
+            const box = definitionBox(definition)
             sections.push(`- ${status}${type !== undefined ? ` · ${type}` : ''}${box !== undefined ? ` · in ${box}` : ''}`)
           }
         }
@@ -1255,10 +1337,11 @@ export function createAutosysDependenciesTool(options: AutosysToolOptions): Tool
               lines.push(`${indent}(${name}: definition not readable)`)
               return
             }
-            const condition = field(definition, 'condition')
-            const box = field(definition, 'boxName', 'box_name')
+            const condition = definitionCondition(definition)
+            const box = definitionBox(definition)
             if (box !== undefined) lines.push(`${indent}- in box ${box} [${await statusOf(box)}] — runs only while its box is running`)
             if (condition === undefined) {
+              if (box === undefined && level === 1 && field(definition, 'startTimes', 'start_times') === undefined) lines.push(`${indent}${noDependencyFieldsNote(name, definition)}`)
               if (box === undefined) lines.push(`${indent}- no starting condition: it runs on its own schedule${field(definition, 'startTimes', 'start_times') !== undefined ? ` (${field(definition, 'startTimes', 'start_times') ?? ''})` : ''}`)
               return
             }
@@ -1291,20 +1374,20 @@ export function createAutosysDependenciesTool(options: AutosysToolOptions): Tool
           const scope = params.searchPattern ?? options.defaultPattern ?? '*'
           const candidates = await client.findJobs(scope)
           // A list that omits conditions means reading each definition, which is capped.
-          const listed = candidates.some((candidate) => 'condition' in candidate)
+          const listed = candidates.some((candidate) => definitionCondition(candidate) !== undefined)
           const definitions = listed
             ? candidates
             : await Promise.all(
                 candidates.slice(0, 300).map((candidate) => client.job(field(candidate, 'name', 'jobName') ?? '').catch(() => ({}) as Record<string, unknown>)),
               )
           const dependents = definitions.filter((candidate) =>
-            parseConditions(field(candidate, 'condition') ?? '').some((reference) => reference.job.toLowerCase() === params.job.toLowerCase() && reference.instance === undefined),
+            parseConditions(definitionCondition(candidate) ?? '').some((reference) => reference.job.toLowerCase() === params.job.toLowerCase() && reference.instance === undefined),
           )
           lines.push(
             dependents.length === 0
               ? `  no job matching ${scope} has a condition naming it${!listed && candidates.length > 300 ? ' (only the first 300 were read — narrow searchPattern)' : ''}`
               : `  ${String(dependents.length)} job(s) wait on it:`,
-            ...dependents.map((candidate) => `  - ${field(candidate, 'name', 'jobName') ?? '?'}: ${field(candidate, 'condition') ?? ''}`),
+            ...dependents.map((candidate) => `  - ${field(candidate, 'name', 'jobName') ?? '?'}: ${definitionCondition(candidate) ?? ''}`),
           )
         }
         return { content: lines.join('\n') }
@@ -1662,6 +1745,266 @@ export function createAutosysRunsTool(options: AutosysToolOptions): Tool<z.infer
   }
 }
 
+// ─── Timing: run length and ETA, the usual start, and every predecessor ──────────────────────────────
+
+/** The runs in a job's history from the last `days`, oldest first; undefined when the server keeps no history here. */
+async function recentRuns(client: AutosysClient, name: string, days: number): Promise<PastRun[] | undefined> {
+  const history = await client.runHistory(name)
+  if (history === undefined) return undefined
+  const since = Date.now() - days * 86_400_000
+  return history
+    .map(toPastRun)
+    .filter((run) => run.start === undefined || run.start >= since)
+    .sort((a, b) => (a.start ?? 0) - (b.start ?? 0))
+}
+
+const NO_HISTORY = 'This server did not answer for run history at the configured address - set config:autosys (paths.runHistory).'
+
+const runStatsSchema = z.object({
+  jobs: z.array(z.string().min(1)).min(1).max(30).describe('Exact job names.'),
+  days: z.number().int().min(1).max(365).optional().describe('How far back to look in the run history. Default 30.'),
+})
+
+export function createAutosysRunStatsTool(options: AutosysToolOptions): Tool<z.infer<typeof runStatsSchema>> {
+  return {
+    name: 'autosys_run_stats',
+    group: 'read',
+    description:
+      'How long AutoSys jobs usually run, from their run history: typical (median), average, fastest and slowest, and nine ' +
+      'runs in ten - successful runs only when there are any. For a job RUNNING now, an ETA in local time: when it should ' +
+      'finish at its typical run time, the likely latest, and whether it is already running longer than usual. Answers ' +
+      '"how long does PAY_LOAD take?" and "when will it finish?".',
+    parametersSchema: runStatsSchema,
+    async execute(params): Promise<ToolResult> {
+      try {
+        const client = await options.client()
+        const days = params.days ?? 30
+        const now = new Date()
+        let historyMissing = false
+        const sections = await inBatches([...new Set(params.jobs.map((job) => job.trim()))], async (name) => {
+          try {
+            const [runs, current] = await Promise.all([recentRuns(client, name, days), client.runInfo(name).catch(() => [] as AutosysRun[])])
+            if (runs === undefined) historyMissing = true
+            const latest = current[0]
+            const { durations, onlySuccess } = runDurations(runs ?? [])
+            const stats = durationStats(durations)
+            const lines = [`${name}: now ${latest?.status ?? 'unknown'}${latest?.lastStart !== undefined ? `, last started ${latest.lastStart}` : ''}`]
+            if (stats === undefined) {
+              lines.push(`  no finished run in the last ${String(days)} days${runs === undefined ? ' (no run history here)' : ''} - nothing to base a run time on.`)
+            } else {
+              lines.push(
+                `  over ${String(stats.count)} ${onlySuccess ? 'successful' : 'finished (none succeeded)'} run(s) in ${String(days)} days: typically ${formatDuration(stats.medianMs)}, average ${formatDuration(stats.meanMs)}, ` +
+                  `fastest ${formatDuration(stats.minMs)}, slowest ${formatDuration(stats.maxMs)}; nine in ten within ${formatDuration(stats.p90Ms)}.`,
+              )
+            }
+            const startedAt = parseAutosysTime(latest?.lastStart)
+            if (latest !== undefined && latest.status.toUpperCase() === 'RUNNING' && startedAt !== undefined) {
+              if (stats === undefined) {
+                lines.push(`  running for ${formatDuration(now.getTime() - startedAt)}; no history to estimate when it will finish.`)
+              } else {
+                const eta = etaFor(startedAt, stats, now.getTime())
+                lines.push(
+                  `  RUNNING for ${formatDuration(eta.elapsedMs)} (since ${localTime(startedAt, now)}). ` +
+                    (eta.overrun
+                      ? `Already longer than nine runs in ten (${formatDuration(stats.p90Ms)}) - running long; it should have finished by ${localTime(eta.latest, now)}.`
+                      : `ETA ${localTime(eta.expected, now)} at its typical run time${eta.expected < now.getTime() ? ' (already past)' : ''}, by ${localTime(eta.latest, now)} at the latest in nine runs in ten.`),
+                )
+              }
+            }
+            return lines.join('\n')
+          } catch (error) {
+            return `${name}: ${error instanceof Error ? error.message : String(error)}`
+          }
+        })
+        return { content: [...sections, `Times are local (${localZone(now)}).`, ...(historyMissing ? [NO_HISTORY] : [])].join('\n\n') }
+      } catch (error) {
+        return errorResult(error)
+      }
+    },
+  }
+}
+
+/** Reads definitions and statuses for a predecessor walk, each job once. */
+function predecessorSource(client: AutosysClient): PredecessorSource & { definitions: Map<string, Record<string, unknown> | undefined> } {
+  const definitions = new Map<string, Record<string, unknown> | undefined>()
+  const statuses = new Map<string, Promise<{ status: string; lastStart?: string | undefined; lastEnd?: string | undefined }>>()
+  return {
+    definitions,
+    async definition(name) {
+      const key = name.toLowerCase()
+      if (!definitions.has(key)) definitions.set(key, await client.job(name).catch(() => undefined))
+      return definitions.get(key)
+    },
+    status(name) {
+      const key = name.toLowerCase()
+      let found = statuses.get(key)
+      if (found === undefined) {
+        found = client
+          .runInfo(name)
+          .then((runs) => {
+            const run = runs[0]
+            return run === undefined
+              ? { status: 'unknown' }
+              : { status: run.status, ...(run.lastStart !== undefined ? { lastStart: run.lastStart } : {}), ...(run.lastEnd !== undefined ? { lastEnd: run.lastEnd } : {}) }
+          })
+          .catch(() => ({ status: 'unknown' }))
+        statuses.set(key, found)
+      }
+      return found
+    },
+    parseConditions,
+    conditionMet: (kind, status) => conditionMet(kind as ConditionReference['kind'], status),
+    field,
+    condition: definitionCondition,
+    box: definitionBox,
+    schedule(definition) {
+      const schedule = jobSchedule(definition)
+      if (schedule === undefined) return undefined
+      const at = [
+        ...(schedule.times.length > 0 ? [`at ${schedule.times.join(', ')}`] : []),
+        ...(schedule.minutesPastHour.length > 0 ? [`hourly at :${schedule.minutesPastHour.map((m) => String(m).padStart(2, '0')).join(', :')}`] : []),
+        ...(schedule.runCalendar !== undefined ? [`on calendar ${schedule.runCalendar}`] : []),
+      ]
+      return `${at.join(' ')} ${describeDays(schedule.days)}${schedule.timezone !== undefined ? ` (${schedule.timezone})` : ''}`
+    },
+  }
+}
+
+const usualStartSchema = z.object({
+  jobs: z.array(z.string().min(1)).min(1).max(20).describe('Exact job names.'),
+  days: z.number().int().min(1).max(365).optional().describe('How far back to look in the run history. Default 30.'),
+  fromDefinitions: z
+    .boolean()
+    .optional()
+    .describe("For a job started by a condition: also work its start out from its predecessors' definitions and run times. Default true."),
+})
+
+export function createAutosysUsualStartTool(options: AutosysToolOptions): Tool<z.infer<typeof usualStartSchema>> {
+  return {
+    name: 'autosys_usual_start',
+    group: 'read',
+    description:
+      'When AutoSys jobs normally start, in local time - especially jobs with no start time of their own, started by a ' +
+      "dependency or their box. Two answers: from the job's own run history (the usual time of day around the clock, and " +
+      'the range nine starts in ten fall in; manual starts and retries left out), and from the job definitions (the chain of ' +
+      'predecessors up to jobs with start times, each with its typical run time). Answers "what time does PAY_LOAD usually start?".',
+    parametersSchema: usualStartSchema,
+    async execute(params): Promise<ToolResult> {
+      try {
+        const client = await options.client()
+        const days = params.days ?? 30
+        const now = new Date()
+        let historyMissing = false
+        const sections = await inBatches([...new Set(params.jobs.map((job) => job.trim()))], async (name) => {
+          try {
+            const source = predecessorSource(client)
+            const definition = await source.definition(name)
+            if (definition === undefined) return `${name}: the definition could not be read.`
+            const lines: string[] = [`${name}:`]
+            const own = source.schedule(definition)
+            const condition = definitionCondition(definition)
+            const box = definitionBox(definition)
+            const startedBy = [condition !== undefined ? `when: ${condition}` : undefined, box !== undefined ? `with its box ${box}` : undefined].filter(
+              (part): part is string => part !== undefined,
+            )
+            lines.push(own !== undefined ? `  its definition starts it ${own}.` : `  no start time of its own - started ${startedBy.join(', and ') || 'by hand or by another instance'}.`)
+            // Observed: the job's own starts, without retries or manual starts.
+            const [runs, eventRecords] = await Promise.all([recentRuns(client, name, days), client.eventHistory(name).catch(() => undefined)])
+            if (runs === undefined) historyMissing = true
+            const classified = classifyRuns(runs ?? [], eventRecords?.map(toJobEvent))
+            const observed = timeOfDayStats(ownStarts(classified))
+            lines.push(
+              observed === undefined
+                ? `  observed: no runs in the last ${String(days)} days to go by.`
+                : `  observed over ${String(observed.count)} run(s): usually starts around ${clockOfMinute(observed.typical)}; nine in ten between ${clockOfMinute(observed.early)} and ${clockOfMinute(observed.late)}` +
+                    `${observed.spreadMinutes > 180 ? ' - spread over hours, so there is no single habit' : ''}${eventRecords === undefined ? ' (manual starts could not be left out: no event history)' : ''}.`,
+            )
+            if (own === undefined && params.fromDefinitions !== false) {
+              const trace = await tracePredecessors(source, name, { maxJobs: 60, maxDepth: 15 })
+              const durations = new Map<string, number>()
+              const startMinutes = new Map<string, number>()
+              await inBatches([...trace.nodes.values()], async (node) => {
+                const key = node.name.toLowerCase()
+                const found = source.definitions.get(key)
+                const first = found === undefined ? undefined : jobSchedule(found)?.times[0]
+                if (first !== undefined && key !== name.toLowerCase()) {
+                  const [hour, minute] = first.split(':').map(Number)
+                  startMinutes.set(key, (hour ?? 0) * 60 + (minute ?? 0))
+                }
+                const stats = durationStats(runDurations((await recentRuns(client, node.name, days).catch(() => undefined)) ?? []).durations)
+                if (stats !== undefined) durations.set(key, stats.medianMs)
+              })
+              const expected = expectedStartFromDefinitions(trace, durations, startMinutes)
+              lines.push(
+                expected.start !== undefined
+                  ? `  from the definitions: about ${clockOfMinute(expected.start)}${expected.start >= 1440 ? ' (the next day)' : ''} - ${expected.via.join(' -> ')}.`
+                  : `  from the definitions: cannot be worked out - ${expected.missing.slice(0, 6).join('; ') || 'no predecessor with a start time'}.`,
+              )
+            }
+            return lines.join('\n')
+          } catch (error) {
+            return `${name}: ${error instanceof Error ? error.message : String(error)}`
+          }
+        })
+        return { content: [...sections, `Times are local (${localZone(now)}).`, ...(historyMissing ? [NO_HISTORY] : [])].join('\n\n') }
+      } catch (error) {
+        return errorResult(error)
+      }
+    },
+  }
+}
+
+const predecessorsSchema = z.object({
+  job: z.string().min(1).describe('The exact job name.'),
+  maxDepth: z.number().int().min(1).max(50).optional().describe('How many levels up to follow. Default 30 - effectively to the top.'),
+  maxJobs: z.number().int().min(1).max(500).optional().describe('Stop after reading this many jobs. Default 200.'),
+  eta: z.boolean().optional().describe('For predecessors RUNNING now, also say when each should finish (reads their run history). Default false.'),
+})
+
+export function createAutosysPredecessorsTool(options: AutosysToolOptions): Tool<z.infer<typeof predecessorsSchema>> {
+  return {
+    name: 'autosys_predecessors',
+    group: 'read',
+    description:
+      'Every predecessor of an AutoSys job, recursively up to the topmost jobs, from the job definitions: each job its ' +
+      'condition names (met or not) and the box it sits in, then theirs - each with its status, last start and end, and ' +
+      'whether its condition is met; topmost jobs with their start schedule. Ends with what is not met and what failed. ' +
+      'Answers "what does PAY_LOAD depend on, all the way up, and where is it stuck?". With eta, running predecessors get an ' +
+      'ETA in local time.',
+    parametersSchema: predecessorsSchema,
+    async execute(params): Promise<ToolResult> {
+      try {
+        const client = await options.client()
+        const now = new Date()
+        const source = predecessorSource(client)
+        const trace = await tracePredecessors(source, params.job.trim(), { maxJobs: params.maxJobs ?? 200, maxDepth: params.maxDepth ?? 30 })
+        const etas = new Map<string, string>()
+        if (params.eta === true) {
+          const running = [...trace.nodes.values()].filter((node) => node.status.toUpperCase() === 'RUNNING' && parseAutosysTime(node.lastStart) !== undefined)
+          await inBatches(running, async (node) => {
+            const stats: DurationStats | undefined = durationStats(runDurations((await recentRuns(client, node.name, 30).catch(() => undefined)) ?? []).durations)
+            const started = parseAutosysTime(node.lastStart) ?? now.getTime()
+            if (stats === undefined) return
+            const eta = etaFor(started, stats, now.getTime())
+            etas.set(
+              node.name.toLowerCase(),
+              eta.overrun ? `running long - nine in ten finish within ${formatDuration(stats.p90Ms)}` : `ETA ${localTime(eta.expected, now)} (latest ${localTime(eta.latest, now)})`,
+            )
+          })
+        }
+        // A root with nothing above it and no schedule of its own usually means the server did not send the condition.
+        const root = trace.nodes.get(params.job.trim().toLowerCase()) ?? [...trace.nodes.values()][0]
+        const rootDefinition =
+          root !== undefined && root.top && root.unreadable === undefined && root.schedule === undefined ? await source.definition(root.name).catch(() => undefined) : undefined
+        const note = root !== undefined && rootDefinition !== undefined ? `\n\n${noDependencyFieldsNote(root.name, rootDefinition)}` : ''
+        return { content: `${describeTrace(trace, (node) => etas.get(node.name.toLowerCase()))}${note}${params.eta === true ? `\nTimes are local (${localZone(now)}).` : ''}` }
+      } catch (error) {
+        return errorResult(error)
+      }
+    },
+  }
+}
+
 /** Every AutoSys tool, in the order they are registered. */
 export function createAutosysTools(options: AutosysToolOptions): Tool<never>[] {
   return [
@@ -1669,7 +2012,10 @@ export function createAutosysTools(options: AutosysToolOptions): Tool<never>[] {
     createAutosysJobTool(options),
     createAutosysStatusTool(options),
     createAutosysRunsTool(options),
+    createAutosysRunStatsTool(options),
+    createAutosysUsualStartTool(options),
     createAutosysDependenciesTool(options),
+    createAutosysPredecessorsTool(options),
     createAutosysLogTool(options),
     createAutosysMachinesTool(options),
     createAutosysGlobalVariablesTool(options),

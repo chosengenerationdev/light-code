@@ -36,14 +36,17 @@ describe('the sizes', () => {
     expect(displayMaxWidth('medium')).toBeLessThan(displayMaxWidth('large') ?? 0)
   })
 
-  /* `full` is what everything did before this existed, so nothing already drawn changes. */
-  it('leaves full uncapped', () => {
+  it('leaves full uncapped, for a picture that asks for it', () => {
     expect(displayMaxWidth('full')).toBeUndefined()
-    expect(DEFAULT_DISPLAY_SIZE).toBe('full')
   })
 
-  it('leaves a picture that asked for nothing exactly as it was', () => {
-    expect(displayMaxWidth(undefined)).toBeUndefined()
+  /*
+   * A picture that asked for nothing is capped at large. It was full, so nothing changed size when sizes arrived;
+   * changed at the user's request, because in Fire Code's wide window full stretched a chart across the screen.
+   */
+  it('caps a picture that asked for nothing at large', () => {
+    expect(DEFAULT_DISPLAY_SIZE).toBe('large')
+    expect(displayMaxWidth(undefined)).toBe(displayMaxWidth('large'))
   })
 
   /*

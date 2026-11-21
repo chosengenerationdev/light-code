@@ -4,6 +4,7 @@ import type { SecretStore } from '../platform/secrets.js'
 import type { Tool, ToolPreview, ToolResult } from '../tools/types.js'
 import { McpConnection, type McpToolDescriptor, type RawToolResult } from './client.js'
 import { denyCheck } from './deny.js'
+import type { McpToolCache, McpToolCacheEntry } from './toolCache.js'
 import {
   isPackageRunnerCommand,
   isStdioServer,
@@ -103,6 +104,12 @@ export class McpRegistry {
   private readonly panelTools = new Map<string, Set<string>>()
   private readonly logs = new Map<string, string[]>()
   private servers: McpServersConfig = {}
+  /**
+   * Servers kept for Light Code's own use: their tools are never offered to the agent (not in the prompt, not through
+   * call_tool), and only Light Code calls them (`callServerTool`). The web chat's Chrome server is one: the agent must
+   * not be able to drive Chrome anywhere (`webchat/guard.ts`, rule 6).
+   */
+  private reserved = new Set<string>()
 
   constructor(
     private readonly secrets: SecretStore,
@@ -123,7 +130,103 @@ export class McpRegistry {
      * reference (see `InterpolationOptions.repositoryDefined`). Absent means none are.
      */
     private readonly isRepositoryServer: (name: string) => Promise<boolean> = async () => false,
+    /** What servers offered when any session of this codebase last connected - see `toolCache.ts`. */
+    private readonly toolCache: McpToolCache | undefined = undefined,
   ) {}
+
+  /** Connections being opened, so two callers asking at once share one start rather than spawning two servers. */
+  private readonly connecting = new Map<string, Promise<void>>()
+  /** Servers whose tools are, for now, the remembered list rather than one the server gave this session. */
+  private readonly fromCache = new Set<string>()
+
+  /**
+   * Offers the remembered tools of every enabled server that has not listed its own yet in this session,
+   * when its connection settings are the ones the list was read under. A call to one waits for the server.
+   */
+  private async primeFromCache(): Promise<void> {
+    if (this.toolCache === undefined) return
+    let cached: Record<string, McpToolCacheEntry>
+    try {
+      cached = await this.toolCache.read()
+    } catch {
+      return
+    }
+    for (const [name, config] of Object.entries(this.servers)) {
+      if (config.disabled === true || this.toolsByServer.has(name)) continue
+      const entry = cached[name]
+      if (entry === undefined || entry.signature !== connectionSignature(config)) continue
+      this.setTools(name, entry.tools, async () => this.liveConnection(name))
+      this.fromCache.add(name)
+    }
+  }
+
+  /** The server's connection, started (or waited for) when it is not open yet. Throws with the reason it failed. */
+  private async liveConnection(name: string): Promise<McpConnection> {
+    const open = this.connections.get(name)
+    if (open !== undefined) return open
+    await this.connectServer(name)
+    const connection = this.connections.get(name)
+    if (connection === undefined) throw new Error(`the server did not start${this.errors.has(name) ? `: ${this.errors.get(name) ?? ''}` : ''}`)
+    return connection
+  }
+
+  /** Records a server's tools - live or remembered - as tools the loop can call. */
+  private setTools(name: string, listed: readonly McpToolDescriptor[], connectionFor: () => Promise<McpConnection>): void {
+    /*
+     * Panel-only tools are kept out of the tool list entirely - not hidden from the prompt but
+     * callable, which `call_tool` would then reach. A button on the add-on's own tab is the only
+     * way to them (`callPanelTool`), so an add-on can offer an action that changes something
+     * (setting up a key on a server) without the model ever being able to ask for it.
+     */
+    this.panelTools.set(name, new Set(listed.filter((descriptor) => descriptor.panelOnly === true).map((descriptor) => descriptor.name)))
+    const descriptors = listed.filter((descriptor) => descriptor.panelOnly !== true)
+    this.toolsByServer.set(
+      name,
+      descriptors.map((descriptor) => ({
+        descriptor,
+        tool: adaptTool(name, descriptor.name, descriptor.description, descriptor.inputSchema, async (args) => {
+          /*
+           * Checked here, at the one place a call leaves for the server.
+           *
+           * Not in the loop and not in the approval gate: those can be auto-approved, and a
+           * rule the user wrote to mean "never" must not be satisfiable by ticking a box. The
+           * rules are read at call time so an edit applies to the next call rather than after
+           * a restart — which is when somebody changes one, having just watched it not fire.
+           */
+          const decision = denyCheck(descriptor.name, args, this.servers[name]?.deny)
+          if (decision.denied) {
+            this.appendLog(name, decision.message ?? 'Refused by a deny rule.')
+            throw new Error(decision.message ?? 'Refused by a deny rule.')
+          }
+          return (await connectionFor()).callTool(descriptor.name, args)
+        }),
+      })),
+    )
+  }
+
+  /**
+   * Starts every enabled server that is not connected yet and waits only for those this session has no
+   * tools for: a server whose remembered list is offered keeps starting in the background, and a call to it
+   * waits for it then. Waits at most `maxWaitMs` even for the others, so one server that never answers
+   * cannot hold a reply - its tools join the turn after it does. Returns the servers still starting.
+   */
+  async ensureReady(maxWaitMs = 45_000): Promise<string[]> {
+    const starting = Object.entries(this.servers)
+      .filter(([name, config]) => config.disabled !== true && !this.connections.has(name))
+      .map(([name]) => ({ name, done: this.connectServer(name).catch(() => undefined) }))
+    const needed = starting.filter((entry) => !this.toolsByServer.has(entry.name))
+    if (needed.length > 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([
+        Promise.all(needed.map((entry) => entry.done)),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, maxWaitMs)
+        }),
+      ])
+      if (timer !== undefined) clearTimeout(timer)
+    }
+    return starting.filter((entry) => this.statuses.get(entry.name) === 'connecting').map((entry) => entry.name)
+  }
 
   /** Replaces the configured server set, closing any that disappeared or changed. */
   async configure(servers: McpServersConfig): Promise<void> {
@@ -151,6 +254,7 @@ export class McpRegistry {
       if (config.disabled === true) {
         this.statuses.set(name, 'disabled')
         this.toolsByServer.delete(name)
+        this.fromCache.delete(name)
         await this.disconnect(name, { silent: true })
       } else if (!this.statuses.has(name) || this.statuses.get(name) === 'disabled') {
         this.statuses.set(name, 'idle')
@@ -161,6 +265,7 @@ export class McpRegistry {
         this.statuses.delete(name)
         this.errors.delete(name)
         this.toolsByServer.delete(name)
+        this.fromCache.delete(name)
       }
     }
 
@@ -168,12 +273,13 @@ export class McpRegistry {
       const config = servers[name]
       // Fire-and-forget: a slow server must not hold up the save that triggered this.
       if (config !== undefined && config.disabled !== true) {
-        void this.connect(name, config).catch(() => {
+        void this.connectServer(name).catch(() => {
           // Already recorded as an error on the server's own state by `connect`.
         })
       }
     }
 
+    await this.primeFromCache()
     this.events.onStateChanged()
   }
 
@@ -196,9 +302,20 @@ export class McpRegistry {
    */
   async connectServer(name: string): Promise<void> {
     if (this.connections.has(name)) return
+    const already = this.connecting.get(name)
+    if (already !== undefined) return already
     const config = this.servers[name]
     if (config === undefined || config.disabled === true) return
-    await this.connect(name, config)
+    /*
+     * Single-flight. The panel-open start and the first message's own check used to run together, and
+     * each saw the server "not connected yet" and started it - two server processes for every server on
+     * every session start, the second replacing the first.
+     */
+    const started = this.connect(name, config).finally(() => {
+      if (this.connecting.get(name) === started) this.connecting.delete(name)
+    })
+    this.connecting.set(name, started)
+    return started
   }
 
   /** Connects every enabled server that is not connected yet. Failures are per-server. */
@@ -206,7 +323,7 @@ export class McpRegistry {
     await Promise.all(
       Object.entries(this.servers)
         .filter(([name, config]) => config.disabled !== true && !this.connections.has(name))
-        .map(([name, config]) => this.connect(name, config)),
+        .map(([name]) => this.connectServer(name)),
     )
   }
 
@@ -241,14 +358,20 @@ export class McpRegistry {
       { repositoryDefined: await this.isRepositoryServer(name) },
     )
 
+    const startedAt = Date.now()
     try {
       await connection.connect()
       this.connections.set(name, connection)
       this.appendLog(name, 'Connected.')
       await this.refreshTools(name)
+      // Named in the log when slow, so "the chat takes minutes to start" points at the server responsible.
+      const seconds = (Date.now() - startedAt) / 1000
+      if (seconds >= 2) this.logger?.info(`[startup] MCP server "${name}" took ${seconds.toFixed(1)}s to start and list its tools`)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      this.logger?.warn(`MCP server "${name}" failed to connect: ${message}`)
+      // Remembered tools of a server that cannot start are withdrawn, so the next turn does not offer them.
+      if (this.fromCache.delete(name)) this.toolsByServer.delete(name)
+      this.logger?.warn(`MCP server "${name}" failed to connect after ${((Date.now() - startedAt) / 1000).toFixed(1)}s: ${message}`)
       // One server failing must not affect the others — state is per-server.
       this.statuses.set(name, 'failed')
       this.errors.set(name, message)
@@ -263,45 +386,15 @@ export class McpRegistry {
 
     try {
       const listed = await connection.listTools()
-      /*
-       * Panel-only tools are kept out of the tool list entirely - not hidden from the prompt but
-       * callable, which `call_tool` would then reach. A button on the add-on's own tab is the only
-       * way to them (`callPanelTool`), so an add-on can offer an action that changes something
-       * (setting up a key on a server) without the model ever being able to ask for it.
-       */
-      this.panelTools.set(name, new Set(listed.filter((descriptor) => descriptor.panelOnly === true).map((descriptor) => descriptor.name)))
-      const descriptors = listed.filter((descriptor) => descriptor.panelOnly !== true)
-      this.toolsByServer.set(
-        name,
-        descriptors.map((descriptor) => ({
-          descriptor,
-          tool: adaptTool(
-            name,
-            descriptor.name,
-            descriptor.description,
-            descriptor.inputSchema,
-            async (args) => {
-              /*
-               * Checked here, at the one place a call leaves for the server.
-               *
-               * Not in the loop and not in the approval gate: those can be auto-approved, and a
-               * rule the user wrote to mean "never" must not be satisfiable by ticking a box. The
-               * rules are read at call time so an edit applies to the next call rather than after
-               * a restart — which is when somebody changes one, having just watched it not fire.
-               */
-              const decision = denyCheck(descriptor.name, args, this.servers[name]?.deny)
-              if (decision.denied) {
-                this.appendLog(name, decision.message ?? 'Refused by a deny rule.')
-                throw new Error(decision.message ?? 'Refused by a deny rule.')
-              }
-              return connection.callTool(descriptor.name, args)
-            },
-          ),
-        })),
-      )
+      this.setTools(name, listed, async () => connection)
+      this.fromCache.delete(name)
+      const config = this.servers[name]
+      if (config !== undefined && this.toolCache !== undefined) {
+        void this.toolCache.write(name, { signature: connectionSignature(config), tools: listed, at: new Date().toISOString() })
+      }
       this.statuses.set(name, 'ready')
       this.errors.delete(name)
-      this.appendLog(name, `Discovered ${descriptors.length} tool(s).`)
+      this.appendLog(name, `Discovered ${listed.filter((descriptor) => descriptor.panelOnly !== true).length} tool(s).`)
     } catch (error) {
       this.statuses.set(name, 'failed')
       this.errors.set(name, error instanceof Error ? error.message : String(error))
@@ -313,6 +406,7 @@ export class McpRegistry {
     await this.connections.get(name)?.close()
     this.connections.delete(name)
     this.toolsByServer.delete(name)
+    this.fromCache.delete(name)
     if (this.servers[name] !== undefined && this.servers[name]?.disabled !== true) {
       this.statuses.set(name, 'idle')
     }
@@ -333,6 +427,36 @@ export class McpRegistry {
     return connection.callToolRaw(tool, args)
   }
 
+  /** Keeps these servers for Light Code's own use (see `reserved`); an empty list releases them. */
+  reserve(servers: readonly string[]): void {
+    this.reserved = new Set(servers)
+  }
+
+  isReserved(server: string): boolean {
+    return this.reserved.has(server)
+  }
+
+  /** A connected server's tools by name, with their input schemas - reserved or not. */
+  serverTools(server: string): { name: string; inputSchema?: Record<string, unknown> }[] {
+    return (this.toolsByServer.get(server) ?? []).map(({ descriptor }) => ({
+      name: descriptor.name,
+      ...(descriptor.inputSchema !== undefined ? { inputSchema: descriptor.inputSchema as Record<string, unknown> } : {}),
+    }))
+  }
+
+  /** The configuration of one server. */
+  serverConfig(server: string): McpServerConfig | undefined {
+    return this.servers[server]
+  }
+
+  /** Calls one tool of a connected server directly - Light Code's own call, never the agent's. */
+  async callServerTool(server: string, tool: string, args: Record<string, unknown>): Promise<RawToolResult> {
+    const connection = this.connections.get(server)
+    if (connection === undefined) throw new Error(`MCP server "${server}" is not running.`)
+    if (!(this.toolsByServer.get(server) ?? []).some((entry) => entry.descriptor.name === tool)) throw new Error(`"${server}" offers no tool "${tool}".`)
+    return connection.callToolRaw(tool, args)
+  }
+
   async restart(name: string): Promise<void> {
     await this.disconnect(name)
     const config = this.servers[name]
@@ -347,7 +471,7 @@ export class McpRegistry {
     const out: Tool[] = []
     for (const [name, discovered] of this.toolsByServer) {
       const config = this.servers[name]
-      if (config === undefined || config.disabled === true) continue
+      if (config === undefined || config.disabled === true || this.reserved.has(name)) continue
       const disabledTools = new Set(config.disabledTools ?? [])
       for (const { descriptor, tool } of discovered) {
         if (!disabledTools.has(descriptor.name)) out.push(tool)

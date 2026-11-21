@@ -179,7 +179,7 @@ export const DIAGRAM_MAX_LEGEND = 8
 
 export const diagramSpecSchema = z
   .object({
-    title: z.string().max(120).optional(),
+    title: z.string().max(120).optional().describe('A heading shown above the diagram.'),
     textSize: z
       .enum(TEXT_SIZES)
       .optional()
@@ -202,8 +202,8 @@ export const diagramSpecSchema = z
       .enum(['down', 'right'])
       .optional()
       .describe('Which way the flow runs. down is the default and suits most flows.'),
-    nodes: z.array(diagramNodeSchema).min(1).max(DIAGRAM_MAX_NODES),
-    edges: z.array(diagramEdgeSchema).max(DIAGRAM_MAX_EDGES),
+    nodes: z.array(diagramNodeSchema).min(1).max(DIAGRAM_MAX_NODES).describe('The boxes, each with an id and a label. Layout is automatic.'),
+    edges: z.array(diagramEdgeSchema).max(DIAGRAM_MAX_EDGES).describe('Arrows between node ids, from -> to.'),
     note: z
       .string()
       .max(400)

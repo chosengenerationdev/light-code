@@ -194,6 +194,9 @@ const PERSONAL_SETTINGS = new Set([
   'setMaxIterations',
   // Whether *this user's* chats compact by themselves - their own conversations, nobody else's.
   'setAutoCompact',
+  'setAutoHandoff',
+  'setUnlimitedSteps',
+  'setComposerCompletion',
   // How patiently *this user's* requests are retried.
   'setConnectionRetry',
   'setTaskExpertLimits',

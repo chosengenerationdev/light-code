@@ -311,6 +311,52 @@ describe('hub', () => {
     expect(h.panel(undefined).notes[0]?.delivered).toBe(true)
     await h.dispose()
   })
+
+  // Asked for: "does it work with anti halucinator too?" - the decision model as its first pass.
+  it('marks a step the first pass is sure of as quiet, sends every event in order, and never skips one', async () => {
+    const sent: { kind: string; quiet: boolean }[] = []
+    const fake = {
+      start: () => undefined,
+      stop: () => undefined,
+      send: (event: { kind: string }, quiet = false) => sent.push({ kind: event.kind, quiet }),
+      flush: () => undefined,
+      remember: () => undefined,
+    } as unknown as ObserverAgent
+    const asked: { kinds: string[]; goal: string }[] = []
+    let sure = true
+    const h = hub({
+      startAgent: () => Promise.resolve(fake),
+      firstPass: async (step, goal) => {
+        asked.push({ kinds: step.map((e) => e.kind), goal })
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        return sure
+      },
+    })
+    await h.configure({ auditor: { enabled: false, recordReasoning: true, notify: true }, guard: { enabled: true } })
+    h.event({ kind: 'turnStart', at, text: 'fix the parser', mode: 'Code', model: 'm' })
+    h.event({ kind: 'toolCall', at, tool: 'read_file', args: '{}' })
+    h.event({ kind: 'toolResult', at, tool: 'read_file', ok: true, text: 'contents' })
+    h.event({ kind: 'decision', at, purpose: 'x', question: 'q', outcome: 'o' })
+    h.event({ kind: 'assistant', at, text: 'done' })
+    // Waits for what was sent, not for a clock: under load a fixed pause is not enough.
+    const sentAtLeast = async (count: number): Promise<void> => {
+      for (let i = 0; i < 400 && sent.length < count; i += 1) await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    await sentAtLeast(4)
+    sure = false
+    h.event({ kind: 'toolResult', at, tool: 'read_file', ok: true, text: 'more' })
+    await sentAtLeast(5)
+    expect(sent).toEqual([
+      { kind: 'turnStart', quiet: false },
+      { kind: 'toolCall', quiet: false },
+      { kind: 'toolResult', quiet: true },
+      { kind: 'assistant', quiet: true },
+      { kind: 'toolResult', quiet: false },
+    ])
+    expect(asked[0]).toEqual({ kinds: ['turnStart', 'toolCall', 'toolResult'], goal: 'fix the parser' })
+    expect(h.firstPassCounts).toEqual({ passed: 2, reviewed: 1 })
+    await h.dispose()
+  })
 })
 
 describe('read_audit_log', () => {

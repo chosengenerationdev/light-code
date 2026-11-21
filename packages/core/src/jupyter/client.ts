@@ -54,17 +54,41 @@ export class JupyterClient {
     return { Authorization: `token ${token}`, 'Content-Type': 'application/json' }
   }
 
-  private async call(method: string, apiPath: string, body?: unknown, signal?: AbortSignal): Promise<HttpResponse> {
+  /**
+   * One call to the user's server.
+   *
+   * **Bounded** (`deadlineMs`, two minutes unless the call says otherwise): a connection that went quiet
+   * - a VPN reconnect, a proxy dropping an idle socket - is never told so, and without a limit the call,
+   * and the agent waiting on it, hung until somebody restarted the agent (reported from real use).
+   * **A stopped server is started** once and the call made again: hubs cull idle servers, and "start it
+   * at the hub's page and try again" was a restart the user had to notice and do by hand.
+   */
+  private async call(
+    method: string,
+    apiPath: string,
+    body?: unknown,
+    signal?: AbortSignal,
+    options: { deadlineMs?: number; afterStart?: boolean } = {},
+  ): Promise<HttpResponse> {
     const tls = await this.tls()
     const headers = await this.headers()
-    const send = (): Promise<HttpResponse> =>
-      this.http.request(`${this.base}${apiPath}`, {
-        method,
-        headers,
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-        ...(signal !== undefined ? { signal } : {}),
-        ...(tls !== undefined ? { tls } : {}),
-      })
+    const deadlineMs = options.deadlineMs ?? CALL_DEADLINE_MS
+    const send = async (): Promise<HttpResponse> => {
+      const bounded = withDeadline(signal, deadlineMs)
+      try {
+        return await this.http.request(`${this.base}${apiPath}`, {
+          method,
+          headers,
+          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+          signal: bounded.signal,
+          ...(tls !== undefined ? { tls } : {}),
+        })
+      } catch (error) {
+        throw bounded.timedOut() ? new JupyterError(`JupyterHub at ${this.spec.url} did not answer within ${String(Math.round(deadlineMs / 1000))} seconds.`) : error
+      } finally {
+        bounded.clear()
+      }
+    }
     let response: HttpResponse
     try {
       response = await send()
@@ -89,9 +113,62 @@ export class JupyterClient {
     // A stopped server answers API calls with 424 or 503 (or the hub's HTML spawn page).
     const type = response.headers['content-type'] ?? ''
     if (response.status === 424 || response.status === 503 || (response.status < 300 && type.includes('text/html'))) {
-      throw new JupyterError(`${this.spec.user}'s JupyterHub server is not running. Start it at ${this.hubHome()} and try again.`, response.status)
+      // Nothing ran on a stopped server, so even a save is safe to send again once it is up.
+      if (options.afterStart !== true && (await this.startServer())) return this.call(method, apiPath, body, signal, { ...options, afterStart: true })
+      throw new JupyterError(`${this.spec.user}'s JupyterHub server is not running, and starting it did not work. Start it at ${this.hubHome()} and try again.`, response.status)
     }
     return response
+  }
+
+  private starting: Promise<boolean> | undefined
+
+  /**
+   * Asks the hub to start the user's server and waits until it is ready (up to three minutes). True when it
+   * is. Shared by every call that found it stopped, so one start is asked for, not one per call. False -
+   * never thrown - when the token may not start servers or the hub refuses: the caller then says so.
+   */
+  startServer(): Promise<boolean> {
+    this.starting ??= this.startServerNow().finally(() => {
+      this.starting = undefined
+    })
+    return this.starting
+  }
+
+  private async startServerNow(): Promise<boolean> {
+    const hub = `${this.spec.url.replace(/\/+$/, '')}/hub/api/users/${encodeURIComponent(this.spec.user)}`
+    const tls = await this.tls()
+    const headers = await this.headers()
+    const ask = async (method: string, url: string): Promise<HttpResponse | undefined> => {
+      const bounded = withDeadline(undefined, 30_000)
+      try {
+        return await this.http.request(url, { method, headers, signal: bounded.signal, ...(tls !== undefined ? { tls } : {}) })
+      } catch {
+        return undefined
+      } finally {
+        bounded.clear()
+      }
+    }
+    const named = this.spec.server
+    const started = await ask('POST', named !== undefined ? `${hub}/servers/${encodeURIComponent(named)}` : `${hub}/server`)
+    // 201 started, 202 starting, 400 already running or starting.
+    if (started === undefined || ![201, 202, 400].includes(started.status)) return false
+    const until = Date.now() + 180_000
+    while (Date.now() < until) {
+      const user = await ask('GET', hub)
+      if (user !== undefined && user.status < 300) {
+        try {
+          const model = (await user.json()) as { server?: unknown; pending?: unknown; servers?: Record<string, { ready?: unknown }> }
+          const entry = model.servers?.[named ?? '']
+          if (entry?.ready === true) return true
+          // Hubs that do not list servers: a URL and nothing pending means up.
+          if (model.servers === undefined && named === undefined && typeof model.server === 'string' && (model.pending === null || model.pending === undefined)) return true
+        } catch {
+          // Not JSON; asked again.
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3_000))
+    }
+    return false
   }
 
   private unreachable(error: unknown): JupyterError {
@@ -190,29 +267,45 @@ export class JupyterClient {
   async startKernel(name: string | undefined): Promise<{ id: string; name: string }> {
     // `path: ''` starts it in the server's file root, where the contents paths are; without it a
     // kernel starts wherever the server process happens to be.
-    const response = await this.call('POST', 'api/kernels', { path: '', ...(name !== undefined ? { name } : {}) })
+    const response = await this.call('POST', 'api/kernels', { path: '', ...(name !== undefined ? { name } : {}) }, undefined, { deadlineMs: 90_000 })
     if (response.status >= 300) throw await this.failure(response, `Starting a${name !== undefined ? ` ${name}` : ''} kernel`)
     const body = (await response.json()) as { id: string; name: string }
     return { id: body.id, name: body.name }
   }
 
   async kernelAlive(id: string): Promise<boolean> {
-    const response = await this.call('GET', `api/kernels/${encodeURIComponent(id)}`)
-    return response.status < 300
+    return (await this.kernelState(id)) !== undefined
+  }
+
+  /** The kernel's `execution_state` (idle, busy, starting...), or undefined when it no longer exists. */
+  async kernelState(id: string): Promise<string | undefined> {
+    const response = await this.call('GET', `api/kernels/${encodeURIComponent(id)}`, undefined, undefined, { deadlineMs: 20_000 })
+    if (response.status >= 300) return undefined
+    try {
+      const model = (await response.json()) as { execution_state?: unknown }
+      return typeof model.execution_state === 'string' ? model.execution_state : 'unknown'
+    } catch {
+      return 'unknown'
+    }
   }
 
   async interruptKernel(id: string): Promise<void> {
-    await this.call('POST', `api/kernels/${encodeURIComponent(id)}/interrupt`)
+    await this.call('POST', `api/kernels/${encodeURIComponent(id)}/interrupt`, undefined, undefined, { deadlineMs: 20_000 })
   }
 
   async shutdownKernel(id: string): Promise<void> {
-    await this.call('DELETE', `api/kernels/${encodeURIComponent(id)}`)
+    await this.call('DELETE', `api/kernels/${encodeURIComponent(id)}`, undefined, undefined, { deadlineMs: 20_000 })
   }
 
-  /** The kernel's message channel, authenticated by header like every other call. */
-  async openChannels(id: string): Promise<WebSocketConnection> {
+  /**
+   * The kernel's message channel, authenticated by header like every other call. With `session`, the server
+   * keeps what the kernel sends while the channel is down and replays it when the same session reconnects
+   * - which is what lets a run cut off mid-way finish (`kernel.ts`).
+   */
+  async openChannels(id: string, session?: string): Promise<WebSocketConnection> {
     if (this.http.openWebSocket === undefined) throw new JupyterError('This host cannot open the WebSocket a kernel needs.')
-    const url = `${this.base.replace(/^http/i, 'ws')}api/kernels/${encodeURIComponent(id)}/channels`
+    const query = session !== undefined ? `?session_id=${encodeURIComponent(session)}` : ''
+    const url = `${this.base.replace(/^http/i, 'ws')}api/kernels/${encodeURIComponent(id)}/channels${query}`
     const tls = await this.tls()
     const headers = await this.headers()
     delete headers['Content-Type']
@@ -246,4 +339,28 @@ export function encodePath(remote: string): string {
   const parts = remote.split('/').filter((p) => p.length > 0)
   if (parts.some((p) => p === '..' || p === '.')) throw new JupyterError(`"${remote}" is not a path inside the server.`)
   return parts.map(encodeURIComponent).join('/')
+}
+
+/** How long one call to the hub may take before it counts as lost, unless the call says otherwise. */
+const CALL_DEADLINE_MS = 120_000
+
+/** The caller's signal, plus a deadline of our own; `timedOut` says which one ended it. */
+function withDeadline(signal: AbortSignal | undefined, ms: number): { signal: AbortSignal; timedOut: () => boolean; clear: () => void } {
+  const controller = new AbortController()
+  let expired = false
+  const timer = setTimeout(() => {
+    expired = true
+    controller.abort()
+  }, ms)
+  const onAbort = (): void => controller.abort()
+  if (signal?.aborted === true) controller.abort()
+  else signal?.addEventListener('abort', onAbort, { once: true })
+  return {
+    signal: controller.signal,
+    timedOut: () => expired,
+    clear: () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+    },
+  }
 }

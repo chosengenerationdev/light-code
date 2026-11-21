@@ -294,7 +294,8 @@ fn due(role: Role, pending: &[Value], oldest: Option<Instant>, force: bool) -> b
     }
     let last = s(pending.last().unwrap(), "kind");
     match role {
-        Role::Guard => matches!(last, "toolResult" | "assistant" | "turnEnd"),
+        // A step the decision model's first pass was sure of comes `quiet`: kept in context, reviewed with the next one.
+        Role::Guard => matches!(last, "toolResult" | "assistant" | "turnEnd") && pending.last().and_then(|e| e.get("quiet")).and_then(Value::as_bool) != Some(true),
         Role::Auditor => last == "turnEnd" || pending.len() >= 12 || oldest.map_or(false, |t| t.elapsed() >= Duration::from_secs(30)),
     }
 }
@@ -606,6 +607,9 @@ mod tests {
 
     #[test]
     fn the_guard_reviews_at_step_boundaries_and_the_auditor_in_batches() {
+        let quiet = vec![json!({ "kind": "toolCall" }), json!({ "kind": "toolResult", "quiet": true })];
+        assert!(!due(Role::Guard, &quiet, Some(Instant::now()), false), "a quiet step waits for the next review");
+        assert!(due(Role::Guard, &[json!({ "kind": "toolResult", "quiet": true }), json!({ "kind": "assistant" })], Some(Instant::now()), false));
         let call = vec![json!({ "kind": "toolCall" })];
         let result = vec![json!({ "kind": "toolCall" }), json!({ "kind": "toolResult" })];
         assert!(!due(Role::Guard, &call, Some(Instant::now()), false));

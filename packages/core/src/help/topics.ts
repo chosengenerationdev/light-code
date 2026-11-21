@@ -206,7 +206,8 @@ Folders you always want readable go in config:filesystem.readRoots.
     title: 'Providers, models and corporate gateways',
     keywords: [
       'provider', 'api key', 'model', 'gateway', 'openai', 'anthropic', 'gemini', 'deepseek',
-      'mtls', 'certificate', 'proxy', 'ca', 'token', '401', 'profile',
+      'mtls', 'certificate', 'proxy', 'ca', 'token', '401', 'profile', 'gemini through a gateway', 'gemini openai compatible',
+      'thought signature', 'gemini 4', 'gemini 3', 'qwen',
     ],
     body: `
 **Settings → Providers.** Several named profiles, switchable from the composer. Three wire
@@ -219,8 +220,12 @@ only — a repository must never be able to repoint where your prompts and your 
 
 **The model dropdown is never a hard dependency.** It is filled from the provider's models
 endpoint, which gateways frequently answer with their own catalogue or a 404, so free-text entry
-is always available. Context window, vision and tool support come from a local table and can be
-overridden per profile; an unknown id defaults conservatively.
+is always available. The list loads once a URL and a key are entered - no model needs choosing
+first - and if it cannot load, the reason is shown under the dropdown. For **Google Gemini** every
+page of Google's catalogue is read and only chat models are listed (embedding, image and video
+models are left out), so pick a new model such as Gemini 4 from the list rather than typing a guess:
+Google answers a retired or mistyped id with a 404. Context window, vision and tool support come
+from a local table and can be overridden per profile; an unknown id defaults conservatively.
 
 **Auth is a separate axis from wire format**, so any strategy composes with any adapter:
 
@@ -244,6 +249,24 @@ every file-reading tool.
 **Test Connection**, in the advanced section, runs load-certs → get-token → list-models and tells
 you **which step failed**. It is the fastest way to turn an opaque TLS or OAuth failure into a
 diagnosis.
+
+**Gemini through an OpenAI-compatible endpoint** (a corporate gateway, or Google's own): choose OpenAI-compatible,
+enter the gateway's URL and the model id as the gateway names it (anything containing "gemini" is recognised, e.g.
+\`gemini-4-pro\` or \`google/gemini-4\`). Light Code then handles what Gemini does differently, and only for Gemini -
+Qwen and other models on the same wire are sent exactly what they were before:
+- **Thought signatures**: from Gemini 3 on, each tool call carries one that must be sent back, or the next request is
+  refused (HTTP 400). They are kept with the conversation (so a chat reopened from History works) and returned; a
+  call without one - an older chat, another model's history - gets Google's documented skip value.
+- **Tool schemas** in the subset Gemini accepts: a limit or default it cannot take is written into the parameter's
+  description; a free-form object (\`call_tool\`'s arguments, Jira fields) is offered as JSON text and turned back into
+  an object for the tool.
+- **Its streams**: tool calls ending with "stop", calls without an id, parallel calls without an index.
+- **Its thoughts**: with Thinking above off on the profile, they are asked for and shown as the reasoning trace. A
+  gateway that refuses the field is asked again without it, and remembered.
+- **A few lines of guidance** in the prompt for Gemini's habits: one tool call per reply, calls only through function
+  calling, parameter names exactly as declared.
+Agent team specialists on a Gemini profile run inside the agent rather than in the Rust helper, which does not carry
+signatures. If a call ever fails with "thought_signature", tell us the gateway and model.
 
 **Behind a proxy?** Settings → Network reports what the environment says. A corporate root CA that
 your proxy presents goes in the same place; adding one does not cost you the public roots.
@@ -558,6 +581,12 @@ connections, config:activeVectorStoreId the current one, config:embedder the emb
 model, and config:retrieval the rest. All user-scope only — a repository able to set the embedder
 URL would exfiltrate your source the moment you opened it.
 
+**Each connection has a Type, and it must match the server.** A new connection starts as Qdrant;
+for a team OpenSearch cluster set Type to OpenSearch. Every connection in the list shows its type,
+and Test connection speaks that type, so a mismatch fails there. A mismatched connection shows up at
+indexing as "Could not read collection ... (HTTP 400)", which now ends by saying the address answers
+like OpenSearch - the fix is the Type, not the project or index name.
+
 **Retrieval is exposed as tools the model calls**, never as tool definitions that change per turn.
 \`search_codebase\` and \`search_docs\` return results as tool *results*, mid-conversation, where
 they cost nothing at the front of the prompt.
@@ -614,6 +643,7 @@ editing, commands and MCP never touch it.
       'outlook busy', 'outlook is busy', 'outlook slow', 'old emails', 'old mail', 'archive',
       'search outlook', 'outlook not responding', 'recalculate', 'shift f9', 'f9', 'calculate',
       'manual calculation', 'stale values',
+      'pivot table', 'pivot tables', 'pivot chart', 'excel chart', 'chart in excel', 'graph in excel', 'combo chart',
       'teams', 'microsoft teams', 'message a colleague', 'tell a team member', 'chat',
     ],
     body: `
@@ -638,6 +668,21 @@ cannot confirm delivery, so glance at the chat if it matters.
 every open workbook (F9; full for Ctrl+Alt+F9). It reports whether calculation is set to manual -
 the usual reason values look stale - and what a small range shows afterwards, and can select the
 range so you see it. It asks first, like other changes to a workbook.
+
+**Charts** (\`excel_chart\`): from data already in a sheet - column, bar, line, pie, doughnut, area,
+scatter, bubble, radar, and on Excel 2016 or later histogram, pareto, waterfall, treemap, sunburst,
+box-and-whisker and funnel. Choose the columns (\`A1:A20,C1:D20\` picks columns A, C and D), titles, axis
+titles, legend, data labels and the value axis's number format. A **combo chart** is a column chart
+with some series given another type, optionally on a secondary axis. It can list, change or delete
+existing charts, and take a picture of one so the assistant can check it shows what you asked for. The
+result lists the cells each series plots.
+
+**Pivot tables** (\`excel_pivot_table\`): name the column headings for rows, columns, values (sum,
+count, average, max, min and others, optionally as a percentage of the total, row or column) and report
+filters; it goes on a new sheet unless you say where, and can draw a pivot chart beside it. The approval
+shows the data's headings and flags any name that is not one of them. It can also read, refresh (after
+the data changes) and delete pivot tables. Both tools ask every time and leave the workbook unsaved -
+ask it to save the workbook to keep them.
 
 **They attach; they do not launch.** The question people have is about the workbook in front of
 them, with unsaved edits, so answering it by starting a second invisible copy would be worse than
@@ -787,7 +832,7 @@ an access token as a Bearer token, leave the user id empty and paste that token 
     keywords: [
       'autosys', 'workload automation', 'wcc', 'jil', 'sendevent', 'autorep', 'force start',
       'force_startjob', 'on hold', 'on ice', 'kill job', 'change status', 'job definition',
-      'job dependencies', 'condition', 'box', 'why has my job not started', 'job failed', 'job log',
+      'job dependencies', 'condition', 'box', 'average run time', 'how long does', 'eta', 'when will it finish', 'usual start time', 'normal start time', 'predecessors', 'upstream jobs', 'top most job', 'why has my job not started', 'job failed', 'job log',
       'apigee', 'gateway', 'token url', 'client id', 'client secret', 'oauth', 'consumer key', 'consumer secret',
       'machine', 'agent', 'running on', 'jobs on host', 'long running', 'global variable', 'calendar',
       'run calendar', 'what runs at', 'scheduled', 'start times', 'read only', 'read-only', 'readonly access',
@@ -895,6 +940,24 @@ with the section \`autosysAddresses\`), for example next to an onboarding page.
   It needs the server's run history and event history; where those live elsewhere set
   config:autosys (paths) runHistory and eventHistory, and the tool names which one is missing. A run
   with no event record is reported as "not known", never guessed as scheduled.
+- \`autosys_run_stats\` — **how long a job usually runs**, from its run history (last 30 days, or as many as you
+  say): typical (median), average, fastest, slowest, and the time nine runs in ten finish within - successful runs
+  only when there are any. For a job **running now**, an **ETA in local time**: when it should finish at its typical
+  run time, the likely latest, and whether it is already running longer than usual.
+- \`autosys_usual_start\` — **when a job normally starts**, in local time, especially one with no start time that a
+  dependency or its box starts. Two answers side by side: what its run history shows (the usual time of day,
+  measured around the clock so a midnight job comes out right, and the range nine starts in ten fall in; manual
+  starts and retries left out), and what its **definitions** imply (its predecessors up to jobs with start times,
+  each with its typical run time - "GL_EXTRACT starts at 01:00 -> PAY_LOAD after it (01:30) -> this job (02:10)").
+- \`autosys_predecessors\` — **every predecessor of a job, all the way up**, from the job definitions: each job its
+  condition names (met or not) and the box it sits in, then theirs, until the topmost jobs (no condition, no box),
+  each with its status, last start and end, and its start schedule at the top. Ends with what is not met and what
+  failed. With eta, predecessors running now get an ETA too - "when will my job start?".
+- **Both read the condition and box wherever the server puts them**: any spelling (\`condition\`, \`Condition\`,
+  \`job_condition\`), one level down (a definition wrapped in \`job\` or \`attributes\`), or a \`condition:\` line in
+  raw JIL text. When a job with no start time shows neither, they say so and list the fields the server did
+  return - then the job address (config:autosys paths.job) does not return the whole definition; find one that
+  does with \`autosys_check_addresses\` or the office wiki.
 - Ask it to **follow a job until it finishes**: it checks the status, waits, and checks again.
 - \`autosys_job_log\` — a job's stderr or stdout, the end of it or matching lines. If the server
   offers no log endpoint, it says which file on which machine the job writes to instead.
@@ -1334,6 +1397,13 @@ them becomes one notice. With a model chosen, the Auditor also reviews each batc
 alerts. Agents can read the record back with **read_audit_log** (summary first, then records with filters;
 rows go straight into the dataframe tool for custom analysis).
 
+**With a decision model** (Settings → Agents → Decision model, e.g. D3), the Anti Hallucinator gets a **first pass**:
+the decision model is asked, for each step, whether it is grounded in its tool results and still on your request. A
+step it is sure of (0.85 by default, config:decisionModel.firstPassThreshold) is still given to the Anti
+Hallucinator, which keeps its whole context, but is reviewed together with the next step that needs a review rather
+than on its own; anything else is reviewed straight away, as before. Fewer full reviews, never none. Off with
+config:decisionModel.firstPass false.
+
 **Their instructions are yours to edit**: each panel has an **Instructions** box (Reset to default puts the shipped
 text back). The reply format and the running notes they must keep are always added after your text, so an edit
 cannot stop the reviews being read or the handoff working.
@@ -1623,6 +1693,7 @@ desktops of the same person; importing the file is how a second machine is set u
       'remote folder', 'remote code', 'not saved to the hub', 'changed on the hub', 'conflict', 'merge',
       'git on the hub', 'commit on the hub', 'push from the hub', 'hub git', 'outside the folder',
       'hub_browse', 'browse the hub', 'other codebase hub', 'files on the hub',
+      'named server', 'named jupyterhub server', 'another server', 'libraries on another hub', 'inspect libraries',
       'hubignore', '.hubignore', 'ignore files', 'do not sync', 'not synced', 'exclude from sync', 'skip folder',
       'node_modules', 'dist folder', 'angular', 'build output', 'sync ignore',
     ],
@@ -1632,6 +1703,13 @@ your hub server (one per line, from your home folder; / for all of it), and an A
 on the hub's Token page (\`<hub>/hub/token\`). The token is saved encrypted in Credentials as
 "JupyterHub <user>@<host>" and only ever sent to that hub, in a header. Optional: a named server and
 a kernel (e.g. python3). Right-click the codebase → JupyterHub settings… changes them later.
+
+**A dropped connection is reconnected by itself.** The kernel channel is a WebSocket through the hub's proxy, which
+VPNs, sleep and proxy timeouts cut. The agent reconnects to the **same kernel**, so variables survive; a run cut off
+mid-way finishes from what the hub kept, and if the hub kept nothing the result says the run finished with its output
+lost. A connection that goes silent without closing is noticed by a heartbeat. Every call to the hub has a time limit,
+and a hub server stopped by idle culling is started again (when your token may) - no agent restart needed. Only a
+kernel the hub no longer has is replaced, and then the result says the earlier state is gone.
 Your hub server must be running; if it is not, the agent says so - start it from the hub's home page.
 
 **\`.hubignore\`** lists files and folders that are never synced, either way - \`.gitignore\` syntax
@@ -1665,7 +1743,8 @@ reported for these codebases. Commands run with execute_command run on this comp
 
 **Git runs on the hub too**: the repository, its remote and its credentials are there, not in the
 copy. Fire Code's sidebar counts and its Commit and push / Pull buttons work for a hub codebase while
-its chat is running - local edits are saved to the hub first, then git commits and pushes there
+any chat of it can run - whichever chat is loaded answers, an unloaded chat page is loaded again, and a
+sleeping codebase is woken for a Commit or Pull - local edits are saved to the hub first, then git commits and pushes there
 (fast-forward-only pulls, fetched here afterwards); "Write with agent" describes the hub's diff. The
 agent runs any other git command with \`hub_run\` shell, approved like any command.
 **Outside the added folders**: \`hub_browse\` lists folders, finds files by name and reads text files
@@ -1673,6 +1752,11 @@ anywhere your hub user can see - read only, nothing copied or changed. It is off
 codebase for its own hub, and in **every other Fire Code codebase** for each hub codebase, named by
 its @name - so a local codebase can look at the hub's files without its own token. Only the added
 folders are copied here and searched with the fast tools; editing stays in the hub codebase.
+**Another codebase's libraries**: \`hub_inspect\` and \`hub_run\` take \`hub\` - another JupyterHub codebase's name,
+a named server included - and then run in that server's own kernel: what is installed there, a function's
+signature and source, or code and shell commands from a folder on that server. That kernel is this chat's own,
+started on first use and shut down with the chat; the other codebase's chat is not touched. Each call is approved,
+and the approval names the server. A local workspace script cannot run there - use shell (\`python path/to/x.py\`).
 
 **Not done for you**: a file deleted here is not deleted on the hub (\`hub_sync\` "status" lists it);
 edits made outside the agent (in VS Code, say) are saved with \`hub_sync\` "push".
@@ -1741,6 +1825,14 @@ title bar), Silent, Sound, Stays (on screen until dismissed) or Alarm (loops unt
 while it stays red or amber, a quiet word when it clears, and quiet hours when only failures get through.
 Each monitor can override it (right-click → How this one notifies), and its own \`notify\` sets the least
 severe level that notifies. Notifications have Open, Acknowledge and Snooze buttons.
+
+**Triage by a decision model** (Settings → Agents → Decision model in Light Code; config:decisionModel.triageAlerts):
+before an alert that just got worse is announced, the decision model is asked whether it needs a person now. Sure
+it does (0.8 or more): it stays on screen (at least Stays) even where the level is set to Sound or Silent. It is given
+the monitor, the level, the headline and the first ten alerts with their rows. Sure it
+can wait (0.2 or less): silent - **never for red**, which is always announced as set. Unsure, no decision model, or no
+answer within 20 seconds: as set. The notification says what the decision model thought. It is asked only while the
+monitoring executor is already running.
 
 **When checks run**: \`every\` ("15m") for an interval - once in each window of the clock (every 10 minutes is
 10:00, 10:10, 10:20 ..., windows counted from UTC so a team across time zones agrees), whoever joined when, kept to \`activeHours\` ("07:00-19:00", or "09:00-" for not
@@ -1864,7 +1956,9 @@ colour on its tile but no longer colours the Monitoring button.
 **An alert explained**: double-click a coloured row. The author's advice for that rule comes first (asked for when
 the monitor is created), then **the agent's explanation** - what is wrong, whether it is new or known from the
 history, what to do. **Start a chat** opens a chat named after the alert in the codebase you pick (the first by
-default), with what is known already in the message box - press Enter to send it.
+default), with what is known already in the message box - the alert, its facts and history, and the explanation
+you just read - press Enter to send it. (Before Fire Code 0.80 the box could open empty when the chat's agent was
+still starting.)
 
 **Fast data collection**: a monitor that reads SQLite or a CSV/Excel/JSON file is read by Fire Code's Rust helper
 (Polars) - no Python at all. Fire Code's Rust tools can be a monitor's source too, with \`"records": true\` (a JSON list
@@ -1892,6 +1986,7 @@ always asks you).
     title: 'Fire Code: several codebases in one Windows window',
     keywords: [
       'fire', 'fire code', 'sun', 'sun code', 'sun light code', 'several codebases', 'multiple codebases', 'multiple projects',
+      'agent to agent', 'ask another agent', 'other codebase agent', 'ask_codebase_agent', 'agents talk', 'another codebase\'s agent',
       'many projects', 'one window', 'parallel', 'background agents', 'desktop app', 'windows app',
       'sidebar', 'sleep', 'idle', 'switch project', 'credentials', 'saved credential',
       'share keys', 'share api keys', 'pycharm', 'intellij keys', 'shared drive', 'network drive',
@@ -1906,8 +2001,28 @@ always asks you).
       'export credentials', 'sun code', 'other codebase', 'another codebase', 'refer to another project',
       'file from another codebase', 'cross codebase', 'waiting for me', 'which codebase is waiting',
       'needs my approval', 'short name', 'codebase name', 'review python tools once',
+      'export setup', 'import setup', 'new machine', 'another computer', 'other machine', 'move to a new laptop',
+      'same setup', 'set up again', 'export codebases', 'import codebases', 'export chats', 'migrate fire code',
     ],
     body: `
+**Moving to another computer**: Settings → Setup → **Export…** saves every codebase with its open chats by name (and,
+if ticked, each codebase's Light Code settings) to \`fire-code-setup.json\`. On the other computer, Settings → Setup →
+**Import…** lists them: each folder can be pointed at where that codebase is there (Browse), a codebase already in
+Fire Code is left alone, and a JupyterHub codebase keeps its hub, user and folders and asks for its token - a saved
+credential with the same name is picked by itself. Chats arrive empty under their names; conversations stay where they
+were. The file holds no password or token: export credentials separately (Settings → Credentials → Export, under a
+passphrase) if the other computer needs them.
+
+**Agents asking each other**: the agent in one codebase can ask the agent in another for help, or to do something
+there, with \`ask_codebase_agent\` - you approve it, seeing the exact request and which codebase it goes to. Fire Code
+opens a new tab on that codebase ("From <codebase>: ...") without switching to it, and that agent starts on the
+request by itself, with its own files, tools, skills and instructions; **its approvals are asked in its own tab**, where
+you can watch or step in. When it finishes, its answer goes back to the first agent. If it stops to ask you something,
+the first agent is told it is waiting in that tab. **Once it has answered, the tab archives itself** (it stays in
+History) - unless it stopped to ask you something, it failed, or you are looking at it (then it goes when you leave
+it). Chains stop three asks deep, scheduled runs cannot ask, and closing the tab tells the first agent there will be
+no answer.
+
 **Editing skills, tools and the standing instructions in Fire Code.** Fire Code has no code editor, so
 *Open* on a skill or tool (and the standing-instructions button in the Skills tab) opens Light Code's own
 editor: a full-panel text box with Save (Ctrl+S), Close (Esc) and a Markdown preview. A save is refused if
@@ -1949,8 +2064,8 @@ another chat on the same codebase — its own agent, working at the same time, w
 keys. To rename a chat - the first one too - double-click its tab, or right-click it → Rename chat; the
 name shows on the tab and in notifications. × or Ctrl+W asks how to close a chat: **Archive** keeps its
 conversation and takes the tab away; **Close and delete** removes its conversations, reports and log
-(files it changed in the codebase stay). **New chat** is always blank - a closed chat's number is never
-reused - and when chats are archived, + offers *New blank chat* or any archived chat, which opens exactly
+(files it changed in the codebase stay). **New chat** starts with an empty conversation - a closed chat's number is
+never reused - and keeps the strategy of the chat you were on (its loops start fresh; pick another or Stop using) - and when chats are archived, + offers *New blank chat* or any archived chat, which opens exactly
 where it was left (each archived row also has a delete). Ctrl+T is always blank. Two safeguards make
 this safe: an edit is refused when the file changed since that chat read it (another chat, you, or any
 program edited it) — the agent re-reads and edits what is there now; and **Rollback undoes only the files
@@ -2014,6 +2129,13 @@ the theme. A codebase may keep its own accent — pick one in its Appearance tab
 icon follows; "Use Fire Code's accent" goes back. Role colours stay each chat's own. None of this
 is written to the config file.
 
+**A decision model** (Settings → Agents → Decision model in any codebase's settings, e.g. D3): besides Agent team
+routing and strategy decisions, it decides **how loudly a monitoring alert is announced** - louder when it needs you
+now, quieter when it can wait, never quieter for red. See the decision-model and monitoring topics.
+
+**After a crash**: a chat whose agent stopped mid-reply carries on by itself when Fire Code restarts it (at most three
+times in a row), and the log of the run that stopped is kept under crashes in the data folder.
+
 **Memory**: idle codebases sleep after 30 minutes by default (Fire Code's Settings), freeing their agent,
 MCP servers and Python worker. Never while working or waiting for you. **Schedules still run**: Fire Code
 keeps their timetable itself and wakes a codebase a minute before a job is due — asleep or never
@@ -2063,6 +2185,23 @@ pages after*; never while it is working or waiting for you), and a whole codebas
 the idle time set there. The chats of one codebase **share** its checkpoint store, its Python venv
 and its index bookkeeping, so a new chat no longer adds another copy of the codebase's snapshots.
 WebView2's cache is capped at 32 MB.
+
+**Starting a chat quickly.** MCP servers are processes of each chat's own agent, so they cannot be shared
+between chats - but what they offer can. Every chat of a codebase remembers each server's tool list in
+one shared file, so a chat started after a crash or a sleep offers those tools at once and replies
+without waiting for the servers; a server keeps starting in the background, and a call to one of its
+tools waits for it. A server with no remembered list is waited for at most 45 seconds, after which the
+reply goes ahead and its tools join the next message. While anything is still getting ready, a bar over
+the message box names it with how long it has taken - each MCP server still starting, Python tools, skills, the model
+gateway's sign-in - and, for skills and Python tools, which folder or step is under way (a folder by its last two
+parts; hover for the whole path); it goes when nothing is left.
+A message sent meanwhile waits at most 20 seconds for skills and 45 for tools, then is answered with what has loaded;
+the rest joins the next message. When that keeps happening, a slow folder (often a network share or a disconnected
+drive) is the usual cause - the log names it. **Skills and Python tools are read in one go**: every folder - the
+bucket and team-repository copies too - is listed and read at once, by the Rust helper where there is one (Fire Code,
+and the VS Code extension on Windows) and by Node in parallel otherwise, and a file not changed since the last load
+is not read again, so after the first message a load costs a folder listing. The agent log
+(\`host.log\`) also names each slow part with a \`[startup]\` line.
 
 **Not in Fire Code**: editor file pickers — paths are typed. Fire Code's
 Settings → Export source code saves the whole repository as a zip that builds offline.
@@ -2176,6 +2315,7 @@ codebases and a whole team. Fire Code's dialog has a button that opens them too.
     keywords: [
       'diagram', 'flowchart', 'flow chart', 'architecture diagram', 'draw', 'save svg', 'save png',
       'save diagram', 'export diagram', 'download diagram', 'diagram as image', 'show_diagram',
+      'table too wide', 'wide table', 'chart too wide', 'compact table', 'chart size', 'full width',
     ],
     body: `
 Ask for a diagram ("draw the request flow", "show the architecture") and the assistant draws one in the
@@ -2185,6 +2325,11 @@ Under each diagram: **Copy SVG** copies the markup to paste into a document or e
 **Save PNG** open a Save dialog - VS Code's own, or a Windows one in Fire Code starting in Downloads - and
 say where the file went. A PNG is drawn at twice the size so it stays sharp in a slide. In a plain browser
 the file downloads instead. If a save fails, the reason is shown under the buttons.
+
+**How wide pictures and tables are**: diagrams and charts are drawn at most "large" (680 pixels) unless the
+assistant is asked otherwise - say "make it smaller" or "show it full width" - and tables are as wide as their
+content, wrapping long cells. So in a wide window, such as Fire Code's, they stay compact while the text around
+them uses the full width; in VS Code's narrow panel nothing changes.
 `,
   },
   {
@@ -2235,6 +2380,9 @@ morning, by which time a toast is long gone. The run log keeps a Report button.
     keywords: [
       'strategy', 'strategies', 'flow chart', 'flowchart', 'chart', 'draw', 'node', 'nodes', 'step', 'steps', 'connector',
       'connectors', 'arrow', 'connect', 'back and forth', 'loop', 'rounds', 'until', 'parallel', 'parallel box', 'contract',
+      'custom role', 'custom roles', 'own context', 'context filling up', 'hand over', 'handover between agents',
+      'strategy per chat', 'different strategy', 'strategy lost', 'keep the strategy', 'new topic', 'strategy after restart',
+      'connect a box', 'box to an agent', 'group of agents', 'box of agents', 'when they all complete', 'instructions for each agent', 'reference files in instructions',
       'read-only role', 'instructions for a role', 'what passed between', 'why did it go back', 'which step is running',
       'add steps', 'add a step', 'add connectors', 'how do i connect', 'sub agent', 'subagent', 'sub agents', 'own process',
       'in the strategy', 'strategy window', 'strategy button', 'a strategy', 'the strategy', 'strategy for', 'agents agreed', 'what was agreed', 'agreed between', 'specialists have', 'their own context', 'own context', 'specialist', 'specialists', 'data contract', 'contract between', 'between agents', 'know about the strategy', 'doesnt know about the strategy',
@@ -2265,12 +2413,53 @@ refuses a round past the maximum - the agent then stops and tells you what is st
 
 **A parallel box.** Press **Add a parallel box** on the left and drop steps into it: they are consulted at the same
 time, each specialist in its own process, and the strategy carries on when all have answered (the agent uses one
-ask_agents call). Drag the box to move it with its steps, its corner to resize it. One role belongs in a box once.
-If several of them need your approval at once, the prompts come one at a time.
+ask_agents call). Drag the box to move it with its steps, its corner to resize it. One role belongs in a parallel box
+once. If several of them need your approval at once, the prompts come one at a time.
 
-**Each step:** the ✎ on a box opens **Instructions for this specialist**, sent to it with every question it is asked
-under this strategy - leave it empty and the main agent decides what to ask it, from its plan. **Read-only** means it
-cannot change anything: it gets no tool that edits or runs commands, and recommends instead.
+**A box (a group of steps).** Press **Add a box** for steps done as a group, one after another - in the order of the
+connectors between them, else as drawn. A box of either kind can be switched on the right ("Run at the same time" or
+"Run as a group").
+
+**A strategy belongs to its chat.** Each chat keeps its own strategy, or none: choosing one with **Save and use in
+this chat** sets it for that chat only. A new chat started from it - **+**, New chat, or in Fire Code a new tab -
+keeps the same strategy with its loops starting afresh; a chat with no strategy gives a new chat with none, and **Stop
+using** takes it off. It is saved with the chat
+and comes back whenever the chat does - reopened from History, after the window reloads, when a Fire Code chat wakes
+from sleep or restarts after a crash - and it is kept even if you chose it before sending anything. **New chat with a
+handoff** carries it into the new chat. **Stop using** in the Strategy window takes it off the chat. Every request in
+the chat follows it, not only the first: for a new topic the agent proposes a new plan that goes through the strategy
+again, and the back-and-forth loops start afresh for it, with their full number of rounds.
+
+**Custom roles work in a strategy** like the built-in ones: a role made in Settings → Agents is consulted by its id
+or its name, and the strategy tells the agent the id beside a custom role's name.
+
+**Each specialist keeps its own context, and the main chat stays lean.** A specialist runs in its own process with
+its own memory. When a step is consulted, Light Code hands it the latest full answer of every step connected into it -
+a box's steps for a connector from a box, and in a back-and-forth the other side's latest - so the main agent does not
+paste one specialist's answer into the next one's question. Each specialist ends with a short "Summary for the main
+agent", and that summary (with any loop verdict or contract note) is all the main chat receives; the full answer stays
+in the strategy record, readable with strategy_history. A new topic starts these hand-overs afresh.
+
+**Connecting a box.** A box is one step of the flow: connect it like a step, from its own dot on the right edge or with
+**Connect to...** when it is selected, to a step or to another box - and connect a step or a box into it. A connector
+out of a box is followed only once every step inside has answered; a connector into a box gives every step inside what
+arrives along it. A back-and-forth joins two steps, never a box, and a box is not connected to a step inside it -
+connect the steps inside to each other instead. A contract on a connector out of a box is told to every step inside;
+its required items are part of that contract rather than checked, since no single answer holds all of them.
+
+**Each step:** the ✎ on a step opens **Instructions for this specialist** - what is expected of it in this strategy -
+sent to it with every question it is asked under this strategy. Type **@** in it to name a workspace file or folder,
+as in the message box: its contents are attached each time the specialist is asked, with the same confinement and
+deny list as @ in the chat. Leave it empty and the main agent decides what to ask it, from its plan. **Read-only** means
+it cannot change anything: it gets no tool that edits or runs commands, and recommends instead.
+
+**A decision step** (only with a decision model - Settings → Agents → Decision model): tick **The decision model picks
+the next step** on a step with two or more connectors out of it, and optionally give the question ("Did the review find
+a security problem?"). Once that step answers, the decision model chooses which connector to follow - by where it leads
+and its label - from the answer, and the main agent is told "go there next". When it is not sure, or there is no
+decision model, the main agent chooses as before. With a decision model, **hand-overs are also scored** against their
+contract: one that falls short is asked for once more and the main agent is told; and **loop conditions** are judged by
+it (see the decision-model topic).
 
 **A contract on a connector** ("What passes along here"): what one step hands to the next, such as "the failing
 tests, each with file:line". The first is told its answer must contain it, the second that it will be given it and to
@@ -2401,7 +2590,7 @@ called at all.
     keywords: [
       'context', 'token', 'window', 'truncate', 'compact', 'cost', 'cache', 'steps', 'iterations',
       'limit', 'continue', 'context length exceeded', 'too long', 'token limit', 'compact now',
-      'lost what i typed', 'draft', 'missing context', 'forgot', 'forgets', 'auto compact', 'compact automatically',
+      'lost what i typed', 'draft', 'missing context', 'forgot', 'forgets', 'auto compact', 'compact automatically', 'auto handoff', 'hand off automatically', 'handoff at limit', 'no step limit', 'unlimited steps', 'disable step limit', 'step limit',
       'retry', 'retries', 'stuck thinking', 'thinking forever', 'hangs', 'connection dropped', 'timeout', '502', '429', 'drag and drop', 'drop a file', 'dropped', 'attach a file',
       'file is too large', 'drag an email', 'add files to context', 'add file to chat', 'copilot',
       'select files', 'current file', 'handoff', 'hand over', 'new chat with handoff', 'new chat with a handoff', 'a handoff', 'start fresh', 'clean handover',
@@ -2426,7 +2615,7 @@ lost; it is just not all in the window at once.
 **A new chat with a handoff** (the button beside +, a page with an arrow): when a long chat is near the
 limit and compacting would blur it, start clean instead. The assistant writes a handoff - the goal, what
 is done and decided, the current state, open questions and next steps - and a new chat opens with it as
-its first message. Your own messages are quoted word for word, and the files read and changed and the
+its first message - and **carries on by itself**: the new chat's first turn starts at once, so there is nothing to send. Your own messages are quoted word for word, and the files read and changed and the
 commands run are listed from the actual tool calls, so nothing important rests on the summary alone. A
 progress panel shows each step and how much has been written; Cancel stops it, and a failure leaves the
 chat as it was. The old chat stays in History. When a reply fails because the conversation is too long
@@ -2437,6 +2626,10 @@ shortened transcript.
 older part (highlighted near the limit); the stored transcript keeps everything, only what is sent to
 the model is shortened, and never in the middle of a tool call. Your own messages are kept **word for
 word** inside the summary, every time, so what you asked for is never paraphrased away.
+Or tick **Hand off automatically** (config:autoHandoff) instead: when the chat reaches the limit the reply stops,
+the assistant writes a handoff, and a new chat starts from it and carries on by itself - this chat stays in History,
+nothing in it summarised. The two are one or the other; ticking one unticks the other. It applies once the chat holds an
+earlier message of yours, so a chat full on its very first message is not handed over and over.
 Tick **Compact automatically** beside the button (config:autoCompact) to have it done near the limit,
 keeping roughly the last third of the window verbatim - and only for a model whose window Light Code
 knows: from the table, from the model's own server (a self-hosted vLLM or SGLang reports its real
@@ -2471,6 +2664,9 @@ Light Code chat**. Typing \`@\` does the same from the keyboard, everywhere.
 something. If it trips, nothing is lost: send another message and it carries on with the full
 transcript. Typing **while a turn is running** grants a fresh 25 as well — the cap exists to stop a
 model looping unattended, and somebody typing is evidence that this is not that.
+**No step limit** (Settings → Approvals, config:unlimitedSteps) lets a chat's reply run until the job is done, you
+press Stop, or the same thing fails three times in a row - pair it with the Anti Hallucinator (Settings → Project),
+which watches each step and steers the agent back when it drifts. Scheduled runs keep the limit.
 
 **Prompt caching is why tool definitions do not change mid-session.** They sit at the front of the
 prompt, so swapping them to "save context" would throw away the cached prefix *and all the history
@@ -2534,6 +2730,75 @@ project's context and is read automatically.
 
 The export has no git history — START_HERE.md shows the three commands to begin a repository — and
 leaves out the demo animations. The Node host has its own \`--export-code\` for the Node half.
+`,
+  },
+  {
+    id: 'files-panel',
+    title: 'Artefacts',
+    keywords: [
+      'files button', 'files panel', 'artefacts', 'artifacts', 'what did it create', 'what files did it make', 'files it changed',
+      'files created', 'output files', 'no git', 'non-code', 'files did it', 'did it create', 'files in this folder', 'what changed in the folder', 'show the files', 'list my files',
+    ],
+    body: `
+The **Files** button in the chat header (a folder) opens a list of the files in the folder the agent works
+in, newest first - made for folders of reports, workbooks and documents, where there is no git to show
+what changed. **This chat** shows what this conversation made or changed: files its tools wrote (with
+the tool and the reason it gave) and anything changed since the chat started, by a command, a script or
+you. **All files** shows the rest.
+
+Each row says what kind of file it is, its size, when it changed, and a line about what is in it where
+that is cheap to tell - a table's columns, a document's first heading, the first line of a script. Click
+a row for more: line and row counts, a workbook's sheets, the start of its text, and every write this
+chat made to it. **Open** opens it in its usual program (text and code in the editor, in VS Code), **Show
+in folder** selects it in Explorer, and **Mention in message** puts \`@path\` in the message box.
+
+Version-control folders, environments (.venv, node_modules) and hidden folders are left out, and a
+code base's .gitignore is honoured. Files on the deny list are not read. On a shared server there is no
+Open or Show in folder: it would happen on the server's screen.
+`,
+  },
+  {
+    id: 'devops-setup',
+    title: 'DevOps setup by the assistant',
+    keywords: [
+      'set up autosys', 'setup autosys', 'configure autosys', 'set up jira', 'configure jira', 'set up jenkins', 'set up confluence',
+      'set up bitbucket', 'help me set up', 'help me configure', 'devops setup', 'devops_setup', 'basic header', 'basic auth string',
+      'svc:pwd', 'base64 username password', 'gateway sign-in', 'apigee autosys',
+    ],
+    body: `
+Ask the assistant to set one up ("help me set up AutoSys"). It asks for the ordinary settings - the site
+address, user name, default project - in a form, then uses **devops_setup**. You approve exactly what will
+be saved; **then** a password box asks for the token, password or client secret. What you type goes
+straight to secure storage: the assistant is told only whether it was stored, and never sees it.
+
+Technical parts are done for you. For AutoSys behind an API gateway that wants a ready-made sign-in value
+(\`Basic\` followed by the base64 of \`user:password\`), choose "gateway with a header value": the value is
+built from the user name and the password you type, stored, and the password itself is not kept. The
+other AutoSys sign-ins are a plain user name and password, the gateway token alone, or the gateway token
+plus the user name and password in a header of their own.
+
+It saves exactly as Settings → DevOps does, then runs Test connection and says who signed in or why not
+(Details in the DevOps tab has every request, credentials masked). It always asks first and never runs in
+a scheduled job. Asking it to "show how Jira is set up" changes nothing.
+`,
+  },
+  {
+    id: 'crash-resume',
+    title: 'Resuming after an agent crash (Fire Code)',
+    keywords: [
+      'agent crashed', 'agent stopped', 'crashed', 'stopped unexpectedly', 'continue after crash', 'resume after crash', 'restart agent',
+      'lost my progress', 'carry on after restart', 'resume interrupted',
+    ],
+    body: `
+The conversation is saved while a turn runs, not only when it ends. When a chat's agent process stops
+unexpectedly, Fire Code shows why and keeps the crash log; press **Restart** and the agent **carries on
+by itself** with the task it was in the middle of - you do not need to type "continue". It is told the
+process stopped, so it checks whether its last step (a command, a file write) already took effect before
+repeating it. Approvals still apply.
+
+It resumes after a crash only. A chat you stopped yourself, or one reopened from History, waits for
+you. If a task crashes the agent three times in a row, it stops resuming and says so - look at the crash
+log (Fire Code keeps it under crashes/ in the chat's folder) before sending a message to go on.
 `,
   },
   {
@@ -2633,6 +2898,146 @@ transcript was written.
 `,
   },
   {
+    id: 'web-chat',
+    title: "Consulting your organisation's web chat (such as Gemini)",
+    keywords: [
+      'web chat', 'webchat', 'gemini', 'ask_web_chat', 'chrome', 'chrome mcp', 'chrome devtools', 'browser', 'internal chat',
+      'consult gemini', 'second opinion', 'capture', 'backend address', 'inside the network', 'outside the organisation',
+    ],
+    body: `
+**\`ask_web_chat\` consults the model behind your organisation's internal web chat** - for when a model (Gemini, say) is
+offered only as a web chat, not as an API. It goes through **your own Chrome, signed in as you**, using your Chrome
+DevTools MCP server. Set it up in Settings → Agents → **Web chat**; it is offered to the assistant only while a Chrome
+DevTools MCP server is connected, and never on a shared server.
+
+**Setting it up (once, for every chat and codebase on this PC):**
+1. **Give the web chat a Chrome DevTools MCP server of its own** - a second entry in Settings → MCP under its own name
+   (e.g. chrome-webchat), so any Chrome server you already use is left exactly as it is - and choose it in the Web chat
+   panel. Add it with \`--autoConnect\`, \`--no-usage-statistics\` and
+   \`--no-performance-crux\` (the panel shows the entry to paste), and allow it in Chrome at
+   chrome://inspect/#remote-debugging. Either installed once (\`npm i -g chrome-devtools-mcp\`), or run with **npx**
+   and a pinned version (\`chrome-devtools-mcp@1.13.0\`, not \`@latest\`); the panel shows where npx downloads it from
+   (\`npm config get registry\` - it should be your organisation's registry).
+2. Type the web chat page's address and press **Capture**. In the tab Light Code selects, start a new chat, choose the
+   model, and send the phrase shown (or press **Send it for me**).
+3. Light Code shows the request that carried it: **the backend address**, the model, and the start of the answer it read.
+   **Use this** approves it - only that backend address is ever used afterwards. **Capture again** to change it.
+
+**It cannot go outside the organisation, by rule - each checked before every consultation, and nothing is sent when one fails:**
+- Light Code opens no connection itself: the request runs inside the chat page, in your Chrome, to the approved
+  backend address on the chat's own site only, with redirects refused; a reply from another site is not used. Your session
+  never reaches Light Code - a header that carries a credential is taken from the page each time, never stored.
+- The Chrome DevTools MCP server must run on this PC (not a remote server) - installed, or through npx with a pinned
+  version - with its reporting to Google off (both flags above), attached to this PC's Chrome only.
+- **The assistant never gets the web chat's Chrome server's tools**: it cannot open a page, click or run anything
+  through it - \`ask_web_chat\` and its one approved request are the only way in. Its tools are replaced by that one
+  tool, so the assistant is given fewer tools, not more. Any other Chrome server you have is untouched - and with it the
+  assistant can still browse as before, with your approvals; only the web chat's server is held to these rules.
+- Every consultation asks you first, showing the exact text and the backend address. Never in scheduled runs.
+
+What stays outside Light Code's control: where your organisation's web chat itself sends what it is given - the same as
+when you type into it. Put in a question only what you would paste into that chat yourself.
+
+**Using it:** ask in plain words ("ask the web chat / Gemini what it thinks of this design"), or let the assistant decide
+when a second opinion is worth an approval. Gemini sees only the question - the assistant puts the code and context in it.
+If the chat tab is signed out, it says so; if the chat changed how it replies, it says to capture again.
+`,
+  },
+  {
+    id: 'decision-model',
+    title: 'A decision model (D3) for Agent team and strategies',
+    keywords: [
+      'decision model', 'd3', 'semantic router', 'vllm semantic router', 'routing', 'route', 'router', 'which specialist',
+      'pick the specialist', 'probabilities', 'calibrated', 'logprobs', 'decision', 'decisions by', 'loop condition',
+      'first pass', 'anti hallucinator first pass', 'decision step', 'hand-over score', 'triage', 'alert triage', 'role suggestion',
+      'right skill', 'right tool', 'choose the skill', 'choose the tool', 'which skill', 'which tool',
+      'judge the loop', 'sent to', 'answer it yourself', 'test decision model', 'systemone', 'decision endpoint', 'noul',
+    ],
+    body: `
+**A decision model answers narrow questions with probabilities** - D3 from vLLM Semantic Router is one. Set it up
+under Settings → Providers as an **OpenAI-compatible** profile, then choose it in Settings → Agents →
+**Decision model** (config:decisionModel.profileId). Until one is chosen, nothing else about it appears and Agent team
+and strategies work exactly as before.
+
+With one chosen:
+- **Agent team mode sends each message to the specialist it picks** (config:decisionModel.routing, on by default), when
+  it is at least config:decisionModel.routeThreshold sure (default 0.75). The main assistant is then told to consult
+  that specialist with \`ask_agent\` - the same as typing \`#role\` yourself - so approvals, read-only roles and the
+  specialist's own context are unchanged. A note above the message box says "Sent to Tester · 0.91"; **Answer it
+  yourself** takes it back while the reply runs. Not done when you address someone with \`#\`, while a strategy is in
+  use (the strategy says who acts), or for scheduled runs. The header says "decisions by <profile>".
+- **Strategy loops are judged by it** (config:decisionModel.judgeLoops, on by default): for a back-and-forth connector
+  with an "until" condition, it is asked whether the condition is met, from the work handed in and the judge's review.
+  At config:decisionModel.loopThreshold or above (default 0.8) it is met; at its mirror or below (0.2) it is not; in
+  between the judging specialist's own CONDITION line decides, as before.
+
+**How it is asked.** D3 does not generate text and does not serve chat completions: it answers on its own decision
+API, \`POST <base URL>/systemone\` (vLLM, and the Semantic Router engine), with a probability for every option of a
+**choice**, a **noul** (yes/no) or a **score** (named levels) question. Light Code asks it that way: the input goes as
+\`state\`, the options with their descriptions as the question's \`criteria\`, pictures as data URLs, and the answer's
+\`structured_decision\` is read per option. **Endpoint** (config:decisionModel.endpoint) is the path on the profile's
+base URL: blank tries \`/systemone\` and, if that path is not there (404), chat completions from then on; a path you
+type - such as \`/d3/v1/systemone\` where an office gateway puts D3 behind its OpenAI-compatible address - is used as
+it is, with no fallback; \`chat\` is for a decision model that only answers chat completions (its probabilities are then
+read from JSON in the answer or from token log-probabilities). An answer with no probabilities is not used - a bare
+"B" says which, not how sure - and the note says why.
+
+**Test decision model** asks a yes/no and a choice sample and shows which API answered, what was read from it, and the
+raw answer. Press it first: a wrong endpoint shows here as HTTP 404 with the path that was asked.
+
+Also, each with its own switch in the same panel (all on once a decision model is chosen):
+- **The skill and the tool for each request**, in any mode - chosen **per chat** with **Picks** beside the mode picker
+  (it appears once a decision model is set up): **off**, **skills** only, **tools** only, or **skills & tools**. Skills
+  only is often enough - a good skill names the tools to use - and is the quicker, with one question instead of two.
+  The chat keeps the choice, and a chat started from it keeps it too: "+", a handoff, a new Fire Code tab. Before each
+  reply it is asked which skill and/or which tool the request needs, from the request and the two messages before it;
+  what stands out (config:decisionModel.suggestThreshold, default 0.25, at most three of each; "nothing in particular"
+  is always an option) is added to your message for the assistant as advice - the skill's file to read first, and for a
+  hidden tool how to reach it. The tools on offer and the prompt's fixed part never change, and every tool is still
+  approved as always. **Speed:** once per message (not per step); with both, the two questions go at once, and D3
+  generates no text, so it is usually a fraction of a second before the reply starts; it never waits more than 4
+  seconds, and a late answer is simply not used. A chat with Picks off asks nothing. Not for scheduled runs.
+- **Anti Hallucinator first pass** (config:decisionModel.firstPass): a step it is sure is grounded and on course
+  (config:decisionModel.firstPassThreshold, default 0.85) is reviewed with the next one instead of on its own.
+- **Decision steps** in the Strategy window: a step whose next step it picks (see the strategies topic).
+- **Hand-over scores** (config:decisionModel.scoreHandOvers): a strategy hand-over that falls short of its connector's
+  contract is asked for once more.
+- **Role suggestions** (config:decisionModel.suggestRoles): in Agent team, when the main assistant consults one
+  specialist and another fits the question better, the answer says so - advice only.
+- **New topics** (config:decisionModel.newTopics): when a plan is rewritten, whether it is new work - then a strategy's
+  loops start again; the built-in rule still applies as well.
+- **Monitoring triage** in Fire Code (config:decisionModel.triageAlerts): an alert is announced louder when it needs you
+  now, quieter when it can wait - never quieter for red.
+
+It advises and never authorises: it cannot approve anything, grant a tool, or change a strategy. Every decision,
+with its probabilities, is in the Auditor's record when the Auditor is on. A decision model that does not answer (10
+seconds) is skipped for that message, with a one-line note.
+`,
+  },
+  {
+    id: 'typing-suggestions',
+    title: 'Suggestions while typing in the chat box',
+    keywords: [
+      'autocomplete', 'auto complete', 'completion', 'type completion', 'type ahead', 'typeahead', 'suggestion',
+      'suggestions', 'grey text', 'gray text', 'ghost text', 'tab to accept', 'accept suggestion', 'ctrl space',
+      'complete my message', 'predict', 'inline suggestion', 'suggest as i type', 'grey suggestion',
+    ],
+    body: `
+**The chat's model can suggest the rest of what you are typing**, in grey after the cursor. Off unless you turn
+it on: Settings → Appearance → **Suggestions while typing** (config:composerCompletion).
+
+- **Tab** takes the next word, so you can take part of a suggestion and go on typing.
+- **Ctrl+Space**, or **Right arrow** with the cursor at the end, takes all of it.
+- **Esc** hides it. Typing something else drops it; typing what it offers keeps the rest in view.
+
+A suggestion is asked for when you pause (half a second) with at least six characters typed and the cursor at the
+end. It uses the model selected for the chat, with your text and the last few messages of the conversation (no tool
+output), and is cut to one line. Each pause is one request to that model's gateway - that is why it is a switch. A
+slow or failing request shows nothing; it never puts an error in the chat. While the \`@\` or \`#\` picker is open,
+Tab and the arrows belong to the picker.
+`,
+  },
+  {
     id: 'appearance',
     title: 'Appearance: theme, accent and the guide',
     keywords: [
@@ -2698,7 +3103,9 @@ walkthrough, whose steps link straight into the tab each one is about. On the No
       'another window', 'other window', 'second window', 'not reflecting', 'not showing',
       'greyed out', 'grayed out', 'disabled', 'cannot click', 'not clickable',
       'python.exe crashed', 'python crashed', 'stopped working', 'agent crashed', 'conversation lost', 'draft lost',
-      'typed message gone', 'host.log',
+      'typed message gone', 'host.log', 'crash log', 'why did it crash', 'exit code', 'out of memory',
+      'slow network', 'network slowness', 'flaky network', 'unreliable network', 'connection reset', 'could not reach',
+      'reaching the model', 'first reply slow', 'first message slow', 'first prompt slow', 'folder names', 'directory names',
     ],
     body: `
 **The agent crashed, or python.exe "stopped working".** A Python tool's worker that crashes is restarted on the
@@ -2709,6 +3116,13 @@ showing its "stopped working" box for the programs it starts, which kept a crash
 conversation is saved as the turn goes - after your message and after each tool result - and what you were typing is
 kept by the agent as well, so a restart loses neither. Each chat's log is \`host.log\` in its data folder, with the
 run before as \`host.previous.log\`: an error the agent survived is written there as "kept running".
+
+**Why did the Fire Code agent stop?** The stopped chat says it: the exit code in words (out of memory, a native
+crash, ended from outside such as antivirus or Task Manager) and where the crashed run's log is kept - a copy in
+\`crashes/host-<date>.log\` in the chat's data folder that a Restart never overwrites (the newest ten are kept). An
+out-of-memory stop also leaves a Node report in \`crash-reports\`. The log has a \`[memory]\` line every ten minutes
+and a warning near the heap limit, so growth before a crash shows; a log that ends without "exiting through Node"
+means the process was killed or crashed natively. Send the kept log and the report when asking for a fix.
 
 **A button is greyed out.** Hover over it: every control that can be disabled says why in its
 tooltip - nothing changed since the last save, a field still empty, a reply still running, a
@@ -2741,7 +3155,20 @@ Then check that the command is on the list, which the panel shows in full.
 **\`@\` does not find a file** — the picker searches the workspace only, and skips \`node_modules\`,
 \`.venv\`, build output and similar. config:filesystem.excludeFromMentions changes that list. Typing
 more of the name narrows it; matching is case-insensitive and matches letters in order, so
-\`mrank\` finds \`mentionRanking.ts\`.
+\`mrank\` finds \`mentionRanking.ts\`. Folder names count too: \`@reports\` offers the \`reports/\` folder
+and the files in it, and choosing a folder keeps the picker open inside it, as does typing a path
+such as \`@src/reports/\`.
+
+**Errors reaching the model on a slow or unreliable network** — a connection gets a minute to come up
+(it used to be ten seconds), and a dropped or reset connection, a slow name lookup or a timeout is
+tried again by itself, up to config:connection (retries) times, showing "Retrying in Ns" with the
+reason. An error that says nothing about retrying is one a retry would not fix: a certificate this
+computer does not trust, a 401, an address that is wrong.
+
+**The first reply of a chat is slow and the rest are quick** — the first message used to wait for
+Python tools to load, skills to be read and the gateway's sign-in, one after another. These now start
+as soon as the chat opens, while you type; if you send before they finish, the message waits only for
+what is still running.
 
 **A tool call times out** — config:tools.timeoutSeconds is the global limit, and a single tool or
 MCP server can have its own; the Tools tab shows which number applies. If raising it changes

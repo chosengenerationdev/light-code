@@ -578,8 +578,8 @@ export function createMonitorShowTool(options: MonitorToolOptions): Tool<z.infer
 }
 
 const controlSchema = z.object({
-  action: z.enum(['pause', 'resume', 'snooze', 'ack', 'unack', 'notify']),
-  name: z.string(),
+  action: z.enum(['pause', 'resume', 'snooze', 'ack', 'unack', 'notify']).describe('pause / resume the checks, snooze notifications, ack / unack alerts, or set how it notifies.'),
+  name: z.string().describe('The monitor.'),
   minutes: z.number().int().min(0).max(10_080).optional().describe('snooze: how long (0 ends a snooze). ack: how long the acknowledgement lasts; omit for as long as the alert lasts.'),
   ids: z.array(z.string()).optional().describe('ack / unack: which alerts, by the ids monitor_status shows. Omit for every alert.'),
   note: z.string().optional().describe('ack: why, kept with it.'),

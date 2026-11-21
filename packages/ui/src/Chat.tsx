@@ -1,3 +1,4 @@
+import { StartupProgress } from './StartupProgress.js'
 import {
   PendingToolApprovals,
   type PendingToolApprovalsProps,
@@ -13,7 +14,9 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 
 import { ApprovalPrompt, type PendingApproval } from './approval/ApprovalPrompt.js'
 import { FormPrompt, type FormFieldValue, type PendingForm } from './FormPrompt.js'
 import { Composer } from './Composer.js'
+import { DecisionRouteNote, type DecisionRoute } from './DecisionRouteNote.js'
 import type { StageFile } from './stagedFiles.js'
+import type { Complete } from './completions.js'
 import { MessageList, type DisplayMessage } from './MessageList.js'
 import { FeedbackBanner, type MessageFeedback } from './MessageActions.js'
 import type { MessageQuote } from '@light-code/core/browser'
@@ -77,8 +80,18 @@ export interface ChatProps {
   onCompact?: (() => void) | undefined
   autoCompact?: boolean | undefined
   onSetAutoCompact?: ((value: boolean) => void) | undefined
+  autoHandoff?: boolean | undefined
+  onSetAutoHandoff?: ((value: boolean) => void) | undefined
+  /** What the chat is still getting ready, for the bar over the message box. */
+  startupWaiting?: readonly { label: string; since: number; full?: string | undefined }[] | undefined
+  /** Agent team with a decision model: where it sent the message (`DecisionRouteNote`). */
+  decisionRoute?: DecisionRoute | undefined
+  onAnswerYourself?: ((role: string) => void) | undefined
+  onDismissRoute?: (() => void) | undefined
   /** Hands a file the panel cannot read to the host. */
   stageFile?: StageFile | undefined
+  /** Grey suggestions while typing; absent when `composerCompletion` is off. */
+  complete?: Complete | undefined
   onPickFiles?: (() => void) | undefined
   addedFiles?: { paths: string[]; nonce: number } | undefined
   prefill?: { text: string; nonce: number } | undefined
@@ -354,7 +367,11 @@ export function Chat(props: ChatProps): ReactElement {
         busy={props.isStreaming}
         autoCompact={props.autoCompact}
         onSetAutoCompact={props.onSetAutoCompact}
+        autoHandoff={props.autoHandoff}
+        onSetAutoHandoff={props.onSetAutoHandoff}
       />
+      <StartupProgress waiting={props.startupWaiting ?? []} />
+      <DecisionRouteNote route={props.decisionRoute} busy={props.isStreaming} onAnswerYourself={(role) => props.onAnswerYourself?.(role)} onDismiss={() => props.onDismissRoute?.()} />
       <FeedbackBanner
         replyTo={props.replyTo}
         onClearReply={() => props.onClearReply?.()}
@@ -383,6 +400,7 @@ export function Chat(props: ChatProps): ReactElement {
         activeSearchId={props.activeSearchId}
         onSelectSearch={props.onSelectSearch}
         stageFile={props.stageFile}
+        complete={props.complete}
         onPickFiles={props.onPickFiles}
         addedFiles={props.addedFiles}
         prefill={props.prefill}

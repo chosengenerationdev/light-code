@@ -169,6 +169,11 @@ const HANDLERS = {
     renderTabs()
   },
   select(m) {
+    // The tab + opened, if a strategy is being carried to it.
+    if (carry !== undefined && projectOf(m.id) === carry.project && !carry.known.has(m.id) && carry.to === undefined) {
+      carry.to = m.id
+      deliverCarry()
+    }
     model.active = m.id
     model.lastChat[projectOf(m.id)] = m.id
     renderTabs()
@@ -207,7 +212,7 @@ const HANDLERS = {
   credentials(m) {
     model.credentials = m.credentials
     model.pipe = m.pipe
-    if (['credentials', 'environment', 'add', 'hub'].includes(openModal?.kind)) openModal.refresh?.()
+    if (['credentials', 'environment', 'add', 'hub', 'setupImport'].includes(openModal?.kind)) openModal.refresh?.()
   },
   report(m) {
     if (openModal?.kind === 'report') openModal.show(m)
@@ -280,6 +285,18 @@ const HANDLERS = {
   credentialError(m) {
     if (openModal?.kind === 'credentials') openModal.failed(m.text)
     else notice(m.text, 'error')
+  },
+  setupPreview(m) {
+    openSetupImport(m.file, m.items)
+  },
+  setupFolderPicked(m) {
+    if (openModal?.kind === 'setupImport') openModal.picked(m.index, m.path, m.added)
+  },
+  setupImported(m) {
+    if (openModal?.kind === 'setupImport') closeModal()
+    const added = `Imported ${m.added} codebase${m.added === 1 ? '' : 's'}.`
+    if ((m.problems ?? []).length === 0) notice(added)
+    else notice(`${added} Not imported: ${m.problems.join(' · ')}`, m.added === 0 ? 'error' : 'info')
   },
 }
 
@@ -637,14 +654,14 @@ function closeChat(key) {
 function newChat(project, anchor) {
   const archived = project.archived ?? []
   // Ctrl+T, with no button to anchor a menu to, is a quick blank chat; the + button always offers the choice.
-  if (anchor === undefined) return send('newChat', { id: project.id })
+  if (anchor === undefined) return newBlankChat(project.id)
   closeMenu()
   const box = anchor.getBoundingClientRect()
   const when = (ms) => (ms > 0 ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '')
   const menu = el(
     'div',
     { class: 'menu', role: 'menu' },
-    el('button', { onclick: () => { closeMenu(); send('newChat', { id: project.id }) } }, el('span', { html: svg(ICONS.plus) }), 'New blank chat'),
+    el('button', { onclick: () => { closeMenu(); newBlankChat(project.id) } }, el('span', { html: svg(ICONS.plus) }), 'New blank chat'),
     el('button', { onclick: () => { closeMenu(); openBranchDialog(project) } }, el('span', { html: svg(ICONS.plus) }), 'New chat on a branch…'),
     archived.length > 0 ? el('hr') : null,
     archived.length > 0 ? el('div', { class: 'menu-label', text: 'Open an archived chat' }) : null,
@@ -981,18 +998,93 @@ function renderList() {
  */
 const gitOf = (project) => (project.hub ? model.hubGit[project.id] : model.git?.[project.id])
 
-/** Asks a codebase's first chat to run git on its hub. False when that chat is not running. */
-function askHubGit(project, op, message) {
-  const frame = $(`.pane[data-id="${project.id}"] iframe`)
-  const url = model.urls[project.id]
-  if (frame?.contentWindow == null || url === undefined) return false
-  frame.contentWindow.postMessage({ source: 'sun', ask: 'hubGit', op, ...(message !== undefined ? { message } : {}) }, new URL(url).origin)
+/**
+ * Sends a request to whichever chat of a codebase can answer it. Every chat is a host on the same folder,
+ * settings and hub, so any of them will do: a loaded page first, then a running chat whose page was unloaded
+ * while idle (loaded again, the request queued until it says ready), then - only when `wake` - the first chat
+ * started. Returns false only when nothing can answer.
+ *
+ * It used to ask the first chat's page alone. That page is unloaded after a few idle minutes when another chat
+ * is on screen, and then Pull said "open the codebase first" while the chat beside it plainly worked - reported,
+ * and cured only by restarting Fire Code, which loads every page again.
+ */
+function askCodebase(project, ask, wake = true) {
+  // An idle chat first: a host refuses hub git while its own turn runs (the kernel is that turn's too).
+  const keys = chatKeys(project).sort((a, b) => (statusOf(a).agent === 'idle' ? 0 : 1) - (statusOf(b).agent === 'idle' ? 0 : 1))
+  const frameOf = (key) => $(`.pane[data-id="${key}"] iframe`)
+  const loaded = keys.find((key) => {
+    const frame = frameOf(key)
+    return model.urls[key] !== undefined && statusOf(key).phase === 'running' && frame?.contentWindow != null && frame.dataset.ready === 'true'
+  })
+  if (loaded !== undefined) {
+    const message = typeof ask === 'object' && ask !== null ? { source: 'sun', ...ask } : { source: 'sun', ask }
+    frameOf(loaded).contentWindow.postMessage(message, new URL(model.urls[loaded]).origin)
+    return true
+  }
+  if (!wake) return false
+  const running = keys.find((key) => model.urls[key] !== undefined && statusOf(key).phase === 'running')
+  const target = running ?? project.id
+  pendingAsks[target] = ask
+  if (running !== undefined) {
+    parked.delete(running)
+    // Counted as hidden from now, or the next unloading pass could take it again before it answers.
+    hiddenSince[running] = Date.now()
+    renderPanes()
+    deliverPendingAsk(running)
+    return true
+  }
+  if (project.missing) {
+    delete pendingAsks[target]
+    return false
+  }
+  // Asleep or stopped: started, and asked once its page is up.
+  if (statusOf(target).phase !== 'starting') send('start', { id: target })
   return true
 }
 
-/** Hub counts go stale like any others; asked again now and then, for the hub codebases that are running. */
+/**
+ * A new blank chat on a codebase, keeping the strategy of the chat it was opened from (asked for: "clicking + didnt
+ * carry the selected strategy"). Each tab is its own agent, so the tab being left is asked for its strategy and the new
+ * tab is handed it once its page is up - the way an alert's text reaches "Start a chat". A tab with no strategy gives a
+ * new tab with none; the new tab's loops start afresh.
+ */
+let carry
+function newBlankChat(projectId) {
+  const from = model.active
+  const frame = from === undefined ? null : $(`.pane[data-id="${from}"] iframe`)
+  const url = from === undefined ? undefined : model.urls[from]
+  if (from !== undefined && projectOf(from) === projectId && frame?.contentWindow != null && url !== undefined && frame.dataset.ready === 'true') {
+    const project = model.projects.find((p) => p.id === projectId)
+    carry = { project: projectId, from, known: new Set(project === undefined ? [] : chatKeys(project)), at: Date.now() }
+    frame.contentWindow.postMessage({ source: 'sun', ask: 'shareStrategy' }, new URL(url).origin)
+  }
+  send('newChat', { id: projectId })
+}
+/** Hands the carried strategy to the new tab once both are known: the strategy, and which tab is new. */
+function deliverCarry() {
+  if (carry === undefined) return
+  if (Date.now() - carry.at > 60_000 || (carry.strategy === null && typeof carry.picks !== 'string')) {
+    carry = undefined
+    return
+  }
+  if (carry.strategy === undefined || carry.to === undefined) return
+  const to = carry.to
+  pendingAsks[to] = { ask: 'useStrategy', strategy: carry.strategy, picks: typeof carry.picks === 'string' ? carry.picks : null }
+  carry = undefined
+  deliverPendingAsk(to)
+}
+
+/** Asks a codebase's agent to run git on its hub. False when nothing can answer. */
+function askHubGit(project, op, message, wake = true) {
+  return askCodebase(project, { ask: 'hubGit', op, ...(message !== undefined ? { message } : {}) }, wake)
+}
+
+/**
+ * Hub counts go stale like any others; asked again now and then, of a page already loaded - never waking a
+ * sleeping codebase or reloading an unloaded page just to refresh a badge.
+ */
 function refreshHubGit() {
-  for (const project of model.projects) if (project.hub) askHubGit(project, 'status')
+  for (const project of model.projects) if (project.hub) askHubGit(project, 'status', undefined, false)
 }
 setInterval(refreshHubGit, 60_000)
 
@@ -1053,7 +1145,7 @@ function gitButtons(project) {
           html: svg(ICONS.pull),
           onclick: stop(() => {
             if (project.hub) {
-              if (!askHubGit(project, 'pull')) return notice('Open the codebase first - git runs on the hub through its agent.', 'error')
+              if (!askHubGit(project, 'pull')) return notice(`${project.name} cannot start here - git runs on the hub through its agent.`, 'error')
               notice(`Pulling ${project.name} on the hub…`)
               return
             }
@@ -1085,13 +1177,10 @@ function openCommit(project) {
       text: 'Write with agent',
       title: "Ask this codebase's agent to write a message from the changes. You can edit it before committing.",
       onclick: () => {
-        const frame = $(`.pane[data-id="${project.id}"] iframe`)
-        const url = model.urls[project.id]
-        if (frame?.contentWindow == null || url === undefined) return notice('Open the codebase first - its agent writes the message.', 'error')
+        if (!askCodebase(project, 'commitMessage')) return notice(`${project.name} cannot start here - its agent writes the message.`, 'error')
         state.writing = true
         why(write, 'The agent is writing a message.')
         write.textContent = 'Writing…'
-        frame.contentWindow.postMessage({ source: 'sun', ask: 'commitMessage' }, new URL(url).origin)
       },
     })
     const button = el('button', {
@@ -1103,7 +1192,7 @@ function openCommit(project) {
         button.textContent = 'Pushing…'
         if (!project.hub) return send('gitCommitPush', { id: project.id, message: state.message })
         if (!askHubGit(project, 'commit', state.message)) {
-          notice('Open the codebase first - git runs on the hub through its agent.', 'error')
+          notice(`${project.name} cannot start here - git runs on the hub through its agent.`, 'error')
           modal.onGitDone(false)
         }
       },
@@ -1307,6 +1396,8 @@ function parkIdlePages() {
     if (hiddenSince[key] === undefined || now - hiddenSince[key] < minutes * 60_000) continue
     // A dialog waiting on this codebase's page (a commit message, hub git) keeps it.
     if (openModal?.projectId === projectOf(key)) continue
+    // So does a request waiting to be delivered to it.
+    if (pendingAsks[key] !== undefined) continue
     parked.add(key)
     frame.remove()
   }
@@ -1480,7 +1571,7 @@ window.addEventListener('message', (event) => {
     sendAppearance(frame)
     deliverPendingAsk(key)
     // The counts for a hub codebase arrive only from its host, so ask as soon as it is up.
-    if (project.hub && key === project.id) askHubGit(project, 'status')
+    if (project.hub) askHubGit(project, 'status', undefined, false)
   }
   // Git run on the hub: counts for the sidebar, or how a commit or pull went.
   if (data.hubGit !== null && typeof data.hubGit === 'object' && project.hub) {
@@ -1492,8 +1583,14 @@ window.addEventListener('message', (event) => {
       if (JSON.stringify(model.hubGit[project.id] ?? null) !== before && !busyEditing()) renderList()
     } else {
       HANDLERS.gitDone({ id: project.id, ok: result.ok === true, text: typeof result.text === 'string' ? result.text.slice(0, 2000) : '' })
-      askHubGit(project, 'status')
+      askHubGit(project, 'status', undefined, false)
     }
+  }
+  // The strategy of the tab + was pressed in, for the tab it opened.
+  if ('carryStrategy' in data && carry !== undefined && key === carry.from) {
+    carry.strategy = data.carryStrategy !== null && typeof data.carryStrategy === 'object' ? data.carryStrategy : null
+    carry.picks = data.carryPicks === 'skills' || data.carryPicks === 'tools' || data.carryPicks === 'both' ? data.carryPicks : null
+    deliverCarry()
   }
   // A commit message the codebase's agent wrote, for the commit dialog to fill in.
   if ('commitMessage' in data && openModal?.kind === 'commit' && openModal.projectId === project.id) {
@@ -1810,7 +1907,7 @@ function shortcut(name) {
   if (name === 'n') return openAdd()
   if (name === ',') return openSettings()
   if (name === 'm') return dash.open ? closeDashboard() : openDashboard()
-  if (name === 't' && model.active !== undefined) return send('newChat', { id: projectOf(model.active) })
+  if (name === 't' && model.active !== undefined) return newBlankChat(projectOf(model.active))
   if (name === 'w' && model.active?.includes('~')) return closeChat(model.active)
   if (name === 'tab') return selectRelative(1)
   if (name === 'shift+tab') return selectRelative(-1)
@@ -1899,7 +1996,7 @@ function showMenu(project, x, y) {
     item('vscode', 'Open in VS Code', () => send('openVsCode', { id: project.id })),
     item('explorer', 'Open in File Explorer', () => send('openExplorer', { id: project.id })),
     el('hr'),
-    item('plus', 'New chat', () => send('newChat', { id: project.id })),
+    item('plus', 'New chat', () => newBlankChat(project.id)),
     item('plus', 'New chat on a branch…', () => openBranchDialog(project)),
     (project.archived ?? []).length > 0
       ? item('archive', `Open an archived chat (${String(project.archived.length)})…`, () => {
@@ -2673,6 +2770,18 @@ function openSettings() {
           el(
             'div',
             { class: 'row' },
+            el(
+              'span',
+              { class: 'meta' },
+              el('b', { text: 'Setup' }),
+              el('span', { text: 'Your codebases and their open chats, to set up another computer the same way.' }),
+            ),
+            el('button', { class: 'secondary', text: 'Export…', title: 'Save every codebase and its open chats to a file', onclick: openSetupExport }),
+            el('button', { class: 'secondary', text: 'Import…', title: 'Add the codebases from a setup file, choosing their folders here', onclick: () => send('chooseSetupImport') }),
+          ),
+          el(
+            'div',
+            { class: 'row' },
             el('span', { class: 'meta' }, el('b', { text: 'Data folder' }), el('span', { text: model.dataFolder })),
             el('button', { class: 'secondary', text: 'Open', onclick: () => send('openDataFolder') }),
           ),
@@ -2694,6 +2803,179 @@ function openSettings() {
       )
     }
     modal.refresh()
+  })
+}
+
+// ─── Setup: moving to another computer ───────────────────────────────────────
+//
+// Export writes every codebase with its open chats (by name) and, if ticked, its Light Code settings;
+// Import shows each one with its folder - changeable, since folders differ between computers - and
+// adds the ticked ones. Rust does the reading and writing (setup.rs); no secret is ever in the file.
+
+function openSetupExport() {
+  showModal('setupExport', (scrim) => {
+    let settings = true
+    const box = el('input', { type: 'checkbox', checked: true, 'aria-label': 'Include each codebase’s Light Code settings' })
+    box.addEventListener('change', () => (settings = box.checked))
+    scrim.append(
+      el(
+        'div',
+        { class: 'modal', style: 'width: min(500px, calc(100vw - 48px))' },
+        el('header', {}, el('h2', { text: 'Export setup' })),
+        el(
+          'div',
+          { class: 'body' },
+          el('p', {
+            class: 'sub',
+            text: `${model.projects.length} codebase${model.projects.length === 1 ? '' : 's'}, each with its open chats by name. JupyterHub codebases keep their hub, user and folders. Conversations are not included, and no password or token is: export credentials separately (Settings → Credentials) if the other computer needs them.`,
+          }),
+          el('label', { class: 'check-row' }, box, el('span', { text: ' Include each codebase’s Light Code settings (providers, MCP servers, skills folders…). They hold no secrets, only the names of them.' })),
+        ),
+        el(
+          'footer',
+          {},
+          el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }),
+          el('button', {
+            class: 'primary',
+            text: 'Export…',
+            onclick: () => {
+              closeModal()
+              send('exportSetup', { settings })
+            },
+          }),
+        ),
+      ),
+    )
+  })
+}
+
+function openSetupImport(file, items) {
+  showModal('setupImport', (scrim, modal) => {
+    const rows = items.map((item) => ({
+      item,
+      chosen: !item.added && (item.hub !== null || item.exists),
+      path: item.path,
+      added: item.added,
+      settings: item.hasSettings,
+      credential: item.hub?.credential ?? '',
+      token: '',
+    }))
+    modal.keepOpen = () => true
+    const card = el('div', { class: 'modal', style: 'width: min(680px, calc(100vw - 48px))' })
+    scrim.append(card)
+    const render = () => {
+      const secrets = (model.credentials ?? []).filter((c) => c.kind !== 'login')
+      const list = rows.map((row, index) => {
+        const { item } = row
+        const tick = el('input', { type: 'checkbox', checked: row.chosen, 'aria-label': `Import ${item.name}` })
+        tick.addEventListener('change', () => {
+          row.chosen = tick.checked
+          render()
+        })
+        const chats = `${item.chats.length} chat${item.chats.length === 1 ? '' : 's'}: ${item.chats.join(', ')}`
+        let where
+        if (item.hub !== null) {
+          const select = el(
+            'select',
+            { class: 'env-select', 'aria-label': `Credential holding ${item.name}'s JupyterHub token` },
+            el('option', { value: '', text: secrets.length === 0 ? 'No saved credentials - paste the token' : 'Paste a token instead…', selected: row.credential === '' }),
+            ...secrets.map((c) => el('option', { value: c.id, text: c.label, selected: c.id === row.credential })),
+          )
+          select.addEventListener('change', () => {
+            row.credential = select.value
+            render()
+          })
+          const token = el('input', { type: 'password', placeholder: 'JupyterHub token (…/hub/token)', autocomplete: 'off', 'aria-label': `${item.name} JupyterHub token` })
+          token.value = row.token
+          token.addEventListener('input', () => (row.token = token.value))
+          where = el(
+            'div',
+            {},
+            el('div', { class: 'field-hint', text: `JupyterHub ${item.hub.user} at ${item.hub.url} · ${item.hub.folders.join(', ')}` }),
+            select,
+            row.credential === '' ? token : null,
+            item.hub.credentialLabel && row.credential === '' && item.hub.credential === null
+              ? el('div', { class: 'field-hint', text: `The token was in a credential called “${item.hub.credentialLabel}”, which is not saved here - import it from Settings → Credentials, or paste the token.` })
+              : null,
+          )
+        } else {
+          const input = el('input', { type: 'text', value: row.path, spellcheck: 'false', 'aria-label': `Folder for ${item.name}` })
+          input.addEventListener('change', () => {
+            row.path = input.value.trim()
+            row.added = false
+          })
+          where = el(
+            'div',
+            {},
+            el('div', { style: 'display: flex; gap: 6px' }, input, el('button', { class: 'secondary', text: 'Browse…', onclick: () => send('pickSetupFolder', { index }) })),
+            row.added
+              ? el('div', { class: 'field-hint', text: 'This folder is already in Fire Code - choose another, or leave this one unticked.' })
+              : !item.exists && row.path === item.path
+                ? el('div', { class: 'field-hint', text: 'Not found on this computer - choose where this codebase is.' })
+                : null,
+          )
+        }
+        const settingsBox = el('input', { type: 'checkbox', checked: row.settings, 'aria-label': `Use ${item.name}'s settings from the file` })
+        settingsBox.addEventListener('change', () => (row.settings = settingsBox.checked))
+        return el(
+          'div',
+          { class: 'row', style: 'align-items: flex-start; gap: 10px' },
+          tick,
+          el(
+            'div',
+            { style: `flex: 1; min-width: 0; ${row.chosen ? '' : 'opacity: .55'}` },
+            el('b', { text: item.name }),
+            el('div', { class: 'field-hint', text: chats }),
+            where,
+            item.hasSettings ? el('label', { class: 'check-row' }, settingsBox, el('span', { text: ' Use its Light Code settings from the file' })) : null,
+          ),
+        )
+      })
+      const count = rows.filter((r) => r.chosen).length
+      card.replaceChildren(
+        el('header', {}, el('h2', { text: 'Import setup' })),
+        el(
+          'div',
+          { class: 'body', style: 'max-height: 60vh; overflow: auto' },
+          el('p', { class: 'sub', text: `From ${file}. Point each codebase at its folder on this computer; JupyterHub codebases keep their hub and need their token here. Each arrives with its chats, empty.` }),
+          ...list,
+        ),
+        el(
+          'footer',
+          {},
+          el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }),
+          el('button', {
+            class: 'primary',
+            text: count === 0 ? 'Import' : `Import ${count}`,
+            ...(count === 0 ? { disabled: true, title: 'Tick at least one codebase to import.' } : {}),
+            onclick: () =>
+              send('importSetup', {
+                items: rows
+                  .map((row, index) => ({ row, index }))
+                  .filter(({ row }) => row.chosen)
+                  .map(({ row, index }) => ({
+                    index,
+                    ...(row.item.hub === null ? { path: row.path } : {}),
+                    ...(row.credential !== '' ? { credential: row.credential } : {}),
+                    ...(row.token.trim() !== '' ? { token: row.token.trim() } : {}),
+                    settings: row.settings,
+                  })),
+              }),
+          }),
+        ),
+      )
+    }
+    modal.picked = (index, path, added) => {
+      const row = rows[index]
+      if (row === undefined) return
+      row.path = path
+      row.added = added
+      row.chosen = !added
+      render()
+    }
+    modal.refresh = render
+    render()
+    send('credentials')
   })
 }
 

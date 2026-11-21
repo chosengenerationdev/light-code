@@ -195,6 +195,9 @@ function Field(props: FieldProps): ReactElement {
            * Validating the text and saying what is wrong is the honest version of the same help.
            */
           inputMode={field.type === 'number' ? 'decimal' : 'text'}
+          // A password or token: hidden as typed. Its value goes to secure storage, never to the assistant.
+          type={field.secret === true ? 'password' : 'text'}
+          autoComplete={field.secret === true ? 'off' : undefined}
           value={String(props.value)}
           onChange={(event) => props.onChange(event.target.value)}
           style={textFieldStyle()}

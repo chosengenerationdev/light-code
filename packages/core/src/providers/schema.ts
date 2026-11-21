@@ -23,36 +23,12 @@ const PORTABLE_KEYWORDS = new Set([
 ])
 
 /**
- * Keywords that are valid JSON Schema but that Gemini's `functionDeclarations` rejects
- * outright with a 400 rather than ignoring. Dropped rather than forwarded.
+ * Gemini refuses any keyword it does not know with a 400, so the Gemini paths keep only
+ * `PORTABLE_KEYWORDS`. This was a list of refused keywords until a schema carrying
+ * `propertyNames` (zod's `z.record`) reached Gemini: a deny list fails open on whichever
+ * keyword nobody listed, and every request then fails until somebody adds it.
  */
-const GEMINI_UNSUPPORTED = new Set([
-  '$schema',
-  '$ref',
-  '$defs',
-  'definitions',
-  'additionalProperties',
-  'oneOf',
-  'anyOf',
-  'allOf',
-  'not',
-  'const',
-  'default',
-  'examples',
-  'patternProperties',
-  'minLength',
-  'maxLength',
-  'pattern',
-  'minimum',
-  'maximum',
-  'exclusiveMinimum',
-  'exclusiveMaximum',
-  'multipleOf',
-  'minItems',
-  'maxItems',
-  'uniqueItems',
-  'format',
-])
+const keepForGemini = (key: string): boolean => PORTABLE_KEYWORDS.has(key)
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -118,7 +94,7 @@ export function toGeminiTools(tools: readonly ToolDefinition[]): Record<string, 
       functionDeclarations: tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
-        parameters: pruneSchema(normalizeObjectSchema(tool.parameters), (key) => !GEMINI_UNSUPPORTED.has(key)),
+        parameters: pruneSchema(normalizeObjectSchema(tool.parameters), keepForGemini),
       })),
     },
   ]
@@ -131,7 +107,7 @@ export function toGeminiTools(tools: readonly ToolDefinition[]): Record<string, 
  * and the model is the user's choice, so the strictest translation (Gemini's) is the safe one.
  */
 export function toPortableParameters(parameters: unknown): Record<string, unknown> {
-  return pruneSchema(normalizeObjectSchema(parameters), (key) => !GEMINI_UNSUPPORTED.has(key)) as Record<string, unknown>
+  return pruneSchema(normalizeObjectSchema(parameters), keepForGemini) as Record<string, unknown>
 }
 
 /**

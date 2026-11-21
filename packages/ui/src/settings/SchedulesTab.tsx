@@ -2,7 +2,7 @@ import type { Schedule, SchedulerStatus, ScheduleTrigger, ScheduleToolInfo } fro
 import { describeNextRun, describeTrigger, riskyGroupsIn } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { ChevronIcon, CopyIcon, PauseIcon, PlayIcon, TrashIcon } from '../icons.js'
-import { activeMentionQuery, insertMention } from '../mentions.js'
+import { activeMentionQuery, insertMention, opensInside } from '../mentions.js'
 import { Select } from '../Select.js'
 import { Panel } from './Panel.js'
 import {
@@ -476,7 +476,7 @@ function ScheduleEditor(props: {
     if (inserted === undefined) return
 
     set({ prompt: inserted.text })
-    setMentionQuery(undefined)
+    setMentionQuery(opensInside(candidate) ? candidate : undefined)
     requestAnimationFrame(() => {
       textarea?.focus()
       textarea?.setSelectionRange(inserted.caret, inserted.caret)

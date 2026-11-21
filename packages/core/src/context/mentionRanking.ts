@@ -11,7 +11,9 @@
  *
  * Someone typing `@auth` is almost always after a file *named* something like auth, not one of
  * forty files sitting in a folder called `auth`. So a filename match outranks a path match, and
- * a filename that *starts* with the query outranks one that merely contains it. After that,
+ * a filename that *starts* with the query outranks one that merely contains it. A folder is ranked by
+ * its own name like a file (offered as `folder/`), and a file inside a folder whose name matches comes
+ * after the name matches. After that,
  * shallower and shorter wins: a match near the root of the repository is more likely the one
  * meant than something buried in generated output.
  */
@@ -34,14 +36,20 @@ export function compareMentionCandidates(query: string): (a: string, b: string) 
   }
 }
 
+/** A folder candidate is offered as `folder/`; its name is the last segment before the slash. */
+function withoutTrailingSlash(candidate: string): string {
+  return candidate.endsWith('/') ? candidate.slice(0, -1) : candidate
+}
+
 function fileNameOf(candidate: string): string {
-  const slash = candidate.lastIndexOf('/')
-  return slash < 0 ? candidate : candidate.slice(slash + 1)
+  const trimmed = withoutTrailingSlash(candidate)
+  const slash = trimmed.lastIndexOf('/')
+  return slash < 0 ? trimmed : trimmed.slice(slash + 1)
 }
 
 function depthOf(candidate: string): number {
   let depth = 0
-  for (const character of candidate) if (character === '/') depth += 1
+  for (const character of withoutTrailingSlash(candidate)) if (character === '/') depth += 1
   return depth
 }
 
@@ -54,6 +62,12 @@ function rank(candidate: string, needle: string): number {
   if (name.slice(0, name.lastIndexOf('.') < 0 ? name.length : name.lastIndexOf('.')) === needle) return 1
   if (name.startsWith(needle)) return 2
   if (name.includes(needle)) return 3
+  // A file inside a folder whose name matches - `@reports` finding `reports/q3.xlsx` - comes after
+  // names that match, and before letters merely found in order.
+  const folders = withoutTrailingSlash(candidate).toLowerCase().split('/').slice(0, -1)
+  if (folders.some((folder) => folder === needle)) return 3.25
+  if (folders.some((folder) => folder.startsWith(needle))) return 3.5
+  if (folders.some((folder) => folder.includes(needle))) return 3.75
   return 4
 }
 

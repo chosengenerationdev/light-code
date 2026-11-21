@@ -583,6 +583,11 @@ export class HttpTransport implements Transport {
     }
   }
 
+  /** How many are listening: the page uses it to know the chat app has subscribed (`main.tsx`). */
+  listenerCount(): number {
+    return this.listeners.size
+  }
+
   onMessage(listener: (message: unknown) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)

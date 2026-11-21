@@ -1,5 +1,5 @@
 import { readSkillAttribution } from '../sharing/attribution.js'
-import fs from 'node:fs/promises'
+import { diskLibraryFs, type LibraryFs } from '../library/snapshot.js'
 import path from 'node:path'
 
 /**
@@ -125,10 +125,10 @@ export function renderSkill(name: string, description: string, body: string): st
  * Matched case-insensitively: the convention is capitals, Windows does not care, and a
  * `skill.md` written on a case-sensitive filesystem should not be a silent absence.
  */
-async function skillFileInFolder(folder: string): Promise<string | undefined> {
+async function skillFileInFolder(folder: string, io: LibraryFs): Promise<string | undefined> {
   try {
-    for (const entry of await fs.readdir(folder)) {
-      if (entry.toLowerCase() === 'skill.md') return path.join(folder, entry)
+    for (const entry of await io.readdir(folder)) {
+      if (entry.name.toLowerCase() === 'skill.md') return path.join(folder, entry.name)
     }
   } catch {
     // Unreadable folder: not a skill, and not worth an issue of its own.
@@ -136,16 +136,16 @@ async function skillFileInFolder(folder: string): Promise<string | undefined> {
   return undefined
 }
 
-async function loadOneDirectory(skillsDir: string): Promise<LoadedSkills> {
+async function loadOneDirectory(skillsDir: string, io: LibraryFs): Promise<LoadedSkills> {
   const skills: Skill[] = []
   const issues: SkillLoadIssue[] = []
 
   /** `[file to read, name to fall back on]`. */
   const candidates: [string, string][] = []
   try {
-    for (const entry of await fs.readdir(skillsDir, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        const inner = await skillFileInFolder(path.join(skillsDir, entry.name))
+    for (const entry of await io.readdir(skillsDir)) {
+      if (entry.isDirectory) {
+        const inner = await skillFileInFolder(path.join(skillsDir, entry.name), io)
         // The folder names the skill, which is the whole point of that layout.
         if (inner !== undefined) candidates.push([inner, entry.name])
       } else if (entry.name.endsWith('.md')) {
@@ -161,7 +161,7 @@ async function loadOneDirectory(skillsDir: string): Promise<LoadedSkills> {
 
   for (const [filePath, fallbackName] of candidates.sort((a, b) => a[0].localeCompare(b[0]))) {
     try {
-      const text = await fs.readFile(filePath, 'utf8')
+      const text = await io.readFile(filePath)
       const parsed = parseFrontmatter(text)
       const labels = readSkillAttribution(text)
       const name = parsed.name ?? fallbackName
@@ -208,16 +208,25 @@ async function loadOneDirectory(skillsDir: string): Promise<LoadedSkills> {
  * itself and report a spurious conflict.
  */
 /** Whether two files hold the same bytes. Unreadable counts as different, so a problem is still reported. */
-async function sameFile(a: string, b: string): Promise<boolean> {
+async function sameFile(a: string, b: string, io: LibraryFs): Promise<boolean> {
   try {
-    const [left, right] = await Promise.all([fs.readFile(a), fs.readFile(b)])
-    return left.equals(right)
+    const [left, right] = await Promise.all([io.readFile(a), io.readFile(b)])
+    return left === right
   } catch {
     return false
   }
 }
 
-export async function loadSkills(dirs: string | readonly string[]): Promise<LoadedSkills> {
+/**
+ * `onFolder` is told each folder as it is read and how long the last one took - so a chat that takes minutes to get
+ * ready names the folder responsible (a share that answers slowly, or not at all) instead of only "Skills".
+ */
+export async function loadSkills(
+  dirs: string | readonly string[],
+  onFolder?: (dir: string, tookMs?: number) => void,
+  /** Where folders and files are read from: a snapshot taken all at once (`library/snapshot.ts`), else the disk. */
+  io: LibraryFs = diskLibraryFs,
+): Promise<LoadedSkills> {
   const ordered = (typeof dirs === 'string' ? [dirs] : dirs).map((dir) => path.resolve(dir))
   const unique = ordered.filter((dir, index) => ordered.indexOf(dir) === index)
 
@@ -226,7 +235,10 @@ export async function loadSkills(dirs: string | readonly string[]): Promise<Load
   const claimed = new Map<string, Skill>()
 
   for (const dir of unique) {
-    const loaded = await loadOneDirectory(dir)
+    onFolder?.(dir)
+    const started = Date.now()
+    const loaded = await loadOneDirectory(dir, io)
+    onFolder?.(dir, Date.now() - started)
     issues.push(...loaded.issues)
 
     for (const skill of loaded.skills) {
@@ -237,7 +249,7 @@ export async function loadSkills(dirs: string | readonly string[]): Promise<Load
          * team repository or a bucket beside the original. Reported, it was a warning per skill you ever
          * shared. A copy that differs is still reported - that is two folders disagreeing.
          */
-        if (await sameFile(winner.filePath, skill.filePath)) continue
+        if (await sameFile(winner.filePath, skill.filePath, io)) continue
         issues.push({
           filePath: skill.filePath,
           detail: `Shadowed: "${skill.name}" is already defined by ${winner.filePath}, which takes precedence.`,

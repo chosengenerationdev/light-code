@@ -32,6 +32,19 @@ Every codebase you work on, in one Windows window — each with its own
 - **Reports in Fire Code**: Markdown and HTML reports from scheduled runs open in Fire Code's own viewer.
 - **One environment for every agent**: a startup script (.cmd, .bat or .ps1), folders to put on PATH,
   and variables — plain values or saved credentials.
+- **Monitoring**: a full-window dashboard of glowing tiles for the checks your agents set up — team and
+  personal, a grid for each with filters and history, and Windows notifications at the levels you choose.
+- **Several branches at once**: a chat on its own branch folder (git worktree), runnable and testable side by
+  side; right-click its tab to open that branch in VS Code.
+- **Agents asking each other**: one codebase's agent can ask another's for help, in a tab of its own.
+- **Moving to a new computer**: Settings → Setup exports every codebase and its chats, and imports them there.
+- **Picks up after a crash**: a chat that was mid-reply when its agent stopped carries on by itself when it
+  restarts, and a log of what happened is kept.
+- **Starts quickly**: MCP tool lists are remembered between chats, skills and Python tools are read in one go by
+  the Rust helper, and a bar over the message box says what a chat is still getting ready.
+- **A decision model, if you have one** (such as D3): picks the specialist for each message in Agent team mode,
+  judges strategy loops and decision steps, gives the Anti Hallucinator a first pass, and decides how loudly a
+  monitoring alert is announced. Nothing changes without one.
 - **Everything Light Code does**: the same tools, MCP, Python tools, skills, Excel and Outlook,
   Confluence, Jira, Bitbucket, Jenkins, AutoSys, search and schedules — it is the same agent.
 

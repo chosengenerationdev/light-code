@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeObjectSchema, toAnthropicTools, toGeminiTools, toOpenAITools } from './schema.js'
+import { normalizeObjectSchema, toAnthropicTools, toGeminiTools, toOpenAITools, toPortableParameters } from './schema.js'
 import type { ToolDefinition } from './types.js'
 
 const readFile: ToolDefinition = {
@@ -148,5 +148,29 @@ describe('toGeminiTools', () => {
       parameters: { type: 'object', properties: { kind: { type: 'string', enum: ['a', 'b'] } } },
     }
     expect(JSON.stringify(toGeminiTools([tool]))).toContain('enum')
+  })
+
+  /**
+   * Reported as a 400 from Gemini naming `propertyNames`, which zod's `z.record` emits. The old
+   * deny list did not name it; anything not on the allow list must go, nested at any depth.
+   */
+  it('drops keywords nobody listed, such as propertyNames from a record schema', () => {
+    const record = { type: 'object', propertyNames: { type: 'string' }, additionalProperties: { type: 'string' } }
+    const tool: ToolDefinition = {
+      name: 'rec',
+      description: 'r',
+      parameters: {
+        type: 'object',
+        properties: {
+          headers: record,
+          rows: { type: 'array', items: { type: 'object', properties: { cells: record }, dependentRequired: {} } },
+        },
+      },
+    }
+    const serialized = JSON.stringify(toGeminiTools([tool]))
+    expect(serialized).not.toContain('propertyNames')
+    expect(serialized).not.toContain('dependentRequired')
+    expect(serialized).toContain('cells')
+    expect(JSON.stringify(toPortableParameters(tool.parameters))).not.toContain('propertyNames')
   })
 })

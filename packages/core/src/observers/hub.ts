@@ -40,7 +40,16 @@ export interface ObserverHubDeps {
   index: () => AuditIndex | undefined
   /** Starts an observer process, or says why it cannot run here. */
   startAgent: (role: ObserverRole, hooks: { onResult: (reply: unknown, raw: string) => void; onStatus: (status: ObserverStatus) => void }) => Promise<ObserverAgent | { problem: string }>
+  /**
+   * The decision model's first pass for the Anti Hallucinator, when one is set up: given the step that just ended
+   * (and the user's request), true when it is sure the step is grounded and on course, so the full review can wait.
+   * Undefined (or an answer of false/undefined) means review as always.
+   */
+  firstPass?: (step: readonly ObservedEvent[], goal: string) => Promise<boolean | undefined>
 }
+
+/** A step ends at these events; the Anti Hallucinator reviews then. */
+const STEP_ENDS = new Set<ObservedEvent['kind']>(['toolResult', 'assistant', 'turnEnd'])
 
 const NOTIFY_GAP_MS = 20_000
 const INDEX_BATCH = 50
@@ -185,9 +194,48 @@ export class ObserverHub {
         this.alert(signal.level, signal.message, 'rules', signal.notify)
       }
     }
-    if (guard.enabled) this.guard?.send(event)
+    // The decision model's own records are for the audit, not for the Anti Hallucinator to review.
+    if (guard.enabled && event.kind !== 'decision') this.toGuard(event)
     // The end of a turn is when the auditor's batch is due and the guard has the whole step.
     if (event.kind === 'turnEnd') this.auditor?.flush()
+  }
+
+  /** Events since the Anti Hallucinator's last step, and the request it is checking against. */
+  private guardStep: ObservedEvent[] = []
+  private guardGoal = ''
+  /** Keeps the guard's events in order while a first pass is being asked. */
+  private guardChain: Promise<void> = Promise.resolve()
+  /** Steps the first pass let through without a full review, and steps reviewed, since the session started. */
+  firstPassCounts = { passed: 0, reviewed: 0 }
+
+  /**
+   * To the Anti Hallucinator, with the decision model's first pass where there is one: a step it is sure of is still
+   * sent - the Anti Hallucinator keeps its whole context - but marked `quiet`, so it is reviewed with the next step
+   * that needs one rather than on its own. A helper that predates `quiet` reviews it anyway, as before.
+   */
+  private toGuard(event: ObservedEvent): void {
+    const firstPass = this.deps.firstPass
+    if (firstPass === undefined) {
+      this.guard?.send(event)
+      return
+    }
+    this.guardChain = this.guardChain.then(async () => {
+      if (event.kind === 'turnStart') {
+        this.guardGoal = event.text
+        this.guardStep = []
+      }
+      this.guardStep.push(event)
+      if (!STEP_ENDS.has(event.kind)) {
+        this.guard?.send(event)
+        return
+      }
+      const step = this.guardStep
+      this.guardStep = []
+      const sure = await firstPass(step, this.guardGoal).catch(() => undefined)
+      if (sure === true) this.firstPassCounts.passed += 1
+      else this.firstPassCounts.reviewed += 1
+      this.guard?.send(event, sure === true)
+    })
   }
 
   /** Notes for the main agent, taken once: they join its conversation at the next step. */
@@ -339,5 +387,7 @@ function redactEvent(event: ObservedEvent, secrets: readonly string[]): Observed
       return { ...event, text: r(event.text) }
     case 'turnEnd':
       return event.error === undefined ? event : { ...event, error: r(event.error) }
+    case 'decision':
+      return { ...event, question: r(event.question), outcome: r(event.outcome) }
   }
 }

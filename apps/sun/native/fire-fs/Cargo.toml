@@ -3,7 +3,7 @@ name = "fire-fs"
 # Its own version, deliberately not Fire Code's. Every Fire Code release bumps that number, and while the
 # helper was a second binary of the same package each bump rebuilt it - Polars and link-time optimisation
 # included - though nothing in it had changed. Raise this only when the helper itself changes.
-version = "1.2.0"
+version = "1.5.0"
 edition = "2021"
 rust-version = "1.86"
 description = "fire-fs: the parallel file, table and SQLite helper Light Code and Fire Code call"

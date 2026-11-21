@@ -252,6 +252,22 @@ export function pruneProgress(
   return kept
 }
 
+/**
+ * Whether a plan replacing another starts a new piece of work rather than revising the current one: there was no
+ * plan, every step of the old one was done, or the new plan keeps none of the old steps. Used so a chat that follows a
+ * strategy starts that strategy's loops afresh for each new topic - otherwise the second topic would find the first
+ * topic's back-and-forth rounds already used up and be refused.
+ */
+export function startsNewWork(previousPlan: string | undefined, previousProgress: PlanProgress | undefined, nextPlan: string | undefined): boolean {
+  const before = parseCheckpoints(previousPlan)
+  const after = parseCheckpoints(nextPlan)
+  if (after.length === 0) return false
+  if (before.length === 0) return true
+  if (before.every((step) => previousProgress?.[step.id]?.status === 'done')) return true
+  const kept = new Set(before.map((step) => step.id))
+  return !after.some((step) => kept.has(step.id))
+}
+
 /** Marks one step, by the number the model was given. Returns undefined when there is no such step. */
 export function markCheckpoint(
   plan: string | undefined,

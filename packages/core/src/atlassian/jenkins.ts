@@ -1086,7 +1086,8 @@ export function createJenkinsWriteJobTool(options: JenkinsToolOptions) {
         set: z.array(parameterInput).optional().describe('Add these parameters, or change those of the same name.'),
         remove: z.array(z.string()).optional().describe('Parameter names to remove.'),
       })
-      .optional(),
+      .optional()
+      .describe("The job's build parameters to add, change or remove."),
     description: z.string().optional().describe("The job's description."),
     edits: z
       .array(z.object({ find: z.string().min(1), replace: z.string() }))

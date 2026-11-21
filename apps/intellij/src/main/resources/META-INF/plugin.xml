@@ -50,6 +50,14 @@
   -->
   <change-notes><![CDATA[
     <ul>
+      <li>Light Code 0.203.0: consult your organisation's web chat (such as Gemini) with ask_web_chat through your own Chrome DevTools MCP server - only the backend address you approve, a dedicated Chrome server you choose, works with chrome-devtools-mcp 1.x; choose per chat whether the decision model picks skills, tools or both; fixes for specialists keeping their context, AutoSys conditions, "only me" skills and tools in the Node host, and shorter paths on the startup bar.</li>
+      <li>Light Code 0.196.0: decision models such as D3 (asked on their own /v1/systemone API, endpoint configurable) - Agent team routing, strategy loop verdicts, decision steps and hand-over scores, an Anti Hallucinator first pass, and per-chat Picks of skills and/or tools; skills and Python tools load in one go and faster; suggestions while typing; AutoSys conditions read however the server shapes them; specialists keep their context through a reply; shorter paths on the startup bar.</li>
+      <li>Light Code 0.192.0: AutoSys run time and ETA, usual start time and recursive predecessors; + keeps the chat's strategy; a slow start no longer holds up the first reply, and the startup bar names the slow step.</li>
+      <li>Light Code 0.190.0: custom roles work with ask_agent and strategies; specialists hand over to each other directly so the main chat stays lean; a bar shows what a starting chat is waiting on; hand off automatically at the context limit; an option for no step limit.</li>
+      <li>Light Code 0.189.0: a strategy stays with its chat through reloads and restarts, a new chat starts with none, and every new topic follows the strategy with fresh loop rounds.</li>
+      <li>Light Code 0.188.0: Strategy boxes connect to steps and other boxes, with a new box for a group of steps done in order; @ files in a step's instructions; chats start answering without waiting for every MCP server.</li>
+      <li>Light Code 0.187.0: @ finds folders by name and searches inside a typed folder; a slow or unreliable network is retried instead of failing at once (a minute to connect, dropped connections and timeouts tried again); the first reply of a chat no longer waits for Python tools, skills and the gateway sign-in one after another.</li>
+      <li>Light Code 0.185.0: Google Gemini's model list loads before a model is chosen and shows newer models such as Gemini 4; Gemini no longer refuses tool schemas over propertyNames; spent API credit is reported at once instead of retried.</li>
       <li>Light Code 0.144.0: Set up SSH key on the Linux add-on's tab; an add-on tab lists its tools.</li>
       <li>Light Code 0.143.0: add-ons can bring their own settings tab; the Linux add-on (SSH, read-only commands, downloads).</li>
       <li>Light Code 0.142.0: a chat page loaded twice no longer stops on "That link has already been used".</li>

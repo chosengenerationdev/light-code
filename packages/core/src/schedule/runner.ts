@@ -42,6 +42,10 @@ import { ALWAYS_AVAILABLE_TO_SCHEDULES, type Schedule } from './types.js'
  * wrapping it, so the policy gate — and that list — never runs.
  */
 export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
+  // Sends text out through the user's browser, each time approved by them: nobody is there to approve it at night.
+  'ask_web_chat',
+  // Another codebase's agent asks for its own approvals in its own tab - nobody is there to give them at 3am.
+  'ask_codebase_agent',
   // A run rewriting the contracts it is checked against would be bound by nothing (the plan's reasoning).
   'set_strategy_contracts',
   // Mass copies and moves need a person reading the plan; an unattended run has none.
@@ -92,6 +96,9 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   'excel_create_workbook',
   'excel_save_workbook',
   'excel_sheets',
+  'excel_chart',
+  'excel_pivot_table',
+  'devops_setup',
   // And running one: unattended execution of arbitrary VBA, with nobody to read the source.
   'excel_run_macro',
   /*

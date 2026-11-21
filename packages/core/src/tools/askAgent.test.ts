@@ -103,3 +103,30 @@ describe('what comes back with a consultation', () => {
     expect(reading).not.toContain('has not seen your workspace')
   })
 })
+
+/*
+ * Reported: "ask agent cannot speak with custom created roles, so strategy doesn't work well with custom created
+ * roles". The role was checked against the five built-in ids before the team was asked, and the strategy named its
+ * steps by the role's display name, which is not its id.
+ */
+describe('a custom role', () => {
+  const team = [agent('security-reviewer', { name: 'Security Reviewer', label: 'Security model' }), agent('programmer')]
+
+  it('is consulted by its id', async () => {
+    const content = await consultAs('security-reviewer', team)
+    expect(content).toContain('ADVICE')
+    expect(content).toContain('Security model')
+  })
+
+  it('is consulted by its name, however it is spelled', async () => {
+    for (const asked of ['Security Reviewer', 'security reviewer', 'SECURITY_REVIEWER']) {
+      expect(await consultAs(asked, team)).toContain('ADVICE')
+    }
+  })
+
+  it('is listed among the roles when an unknown one is asked for', async () => {
+    const content = await consultAs('architect', team)
+    expect(content).toContain('There is no "architect" role')
+    expect(content).toContain('security-reviewer')
+  })
+})

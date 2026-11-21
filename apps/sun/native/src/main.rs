@@ -16,11 +16,13 @@ mod git;
 mod hub;
 mod reports;
 mod host;
+mod agents;
 mod monitor;
 mod monitoring;
 mod state;
 mod system;
 mod share;
+mod setup;
 mod vault;
 
 use std::borrow::Cow;
@@ -134,6 +136,9 @@ struct Runtime {
     woke_for_schedule: bool,
     /// What the agent is waiting for you to do, while it waits: approval, form or question.
     waiting_for: Option<String>,
+    /// Its last process stopped unexpectedly. The next start tells the host to carry on with the turn it was
+    /// cut off in, rather than waiting for a message (asked for: "it waits for me to give a message to continue").
+    crashed: bool,
 }
 
 impl Runtime {
@@ -150,6 +155,7 @@ impl Runtime {
             unread: false,
             woke_for_schedule: false,
             waiting_for: None,
+            crashed: false,
         }
     }
 }
@@ -172,6 +178,8 @@ struct App {
     import_items: Option<Vec<vault::Portable>>,
     /// Keys found for the JetBrains import, held here until confirmed; only names reach the page.
     jetbrains_keys: Option<Vec<(String, String, String)>>,
+    /// A setup file being imported (setup.rs), held from its preview until the import is confirmed.
+    setup_import: Option<setup::SetupFile>,
     /// A problem with Fire Code's environment (a deleted credential) has been said; said again after a save.
     env_warned: bool,
     script: ScriptState,
@@ -184,6 +192,26 @@ struct App {
     monitoring: monitoring::Monitoring,
     /// The theme or accent changed: the grid windows follow it.
     appearance_changed: bool,
+    /// One codebase's agent asking another's (`agents.rs`).
+    agents: agents::Agents,
+}
+
+/// One codebase from a setup file being imported, as the import dialog chose it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupChoice {
+    index: usize,
+    /// The folder on this computer; the one in the file when absent.
+    #[serde(default)]
+    path: Option<String>,
+    /// A JupyterHub codebase's token: a saved credential's id, or a pasted token saved as one.
+    #[serde(default)]
+    credential: Option<String>,
+    #[serde(default)]
+    token: Option<String>,
+    /// Use the Light Code settings from the file (otherwise the codebase starts with its own, empty).
+    #[serde(default)]
+    settings: bool,
 }
 
 #[derive(Deserialize)]
@@ -233,6 +261,11 @@ enum Command {
     ImportCredentials { indexes: Vec<usize> },
     /// Keys the IntelliJ / PyCharm plugin's Node host keeps: listed by name, imported on confirm.
     ScanJetBrains,
+    /// Settings → Setup: the codebases and their open chats, to a file for another computer (setup.rs).
+    ExportSetup { #[serde(default)] settings: bool },
+    ChooseSetupImport,
+    PickSetupFolder { index: usize },
+    ImportSetup { items: Vec<SetupChoice> },
     ImportJetBrains { indexes: Vec<usize> },
     /// Fire Code's environment, validated as a whole: PATH folders and variables.
     #[serde(rename_all = "camelCase")]
@@ -453,6 +486,7 @@ fn main() {
         import_text: None,
         import_items: None,
         jetbrains_keys: None,
+        setup_import: None,
         env_warned: false,
         script: ScriptState::None,
         waiting: Vec::new(),
@@ -460,6 +494,7 @@ fn main() {
         git_busy: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         monitoring: monitoring::Monitoring::new(monitoring_root),
         appearance_changed: false,
+        agents: agents::Agents::default(),
     };
     // Before anything can start, so the first agent already has what the script sets.
     app.update_report_roots();
@@ -1269,6 +1304,17 @@ impl App {
                     Err(text) => send(webview, json!({ "type": "credentialError", "text": text })),
                 }
             }
+            Command::ExportSetup { settings } => self.export_setup(settings, window, webview),
+            Command::ChooseSetupImport => self.choose_setup_import(window, webview),
+            Command::PickSetupFolder { index } => {
+                let picked = rfd::FileDialog::new().set_title("Choose this codebase's folder").set_parent(window).pick_folder();
+                if let Some(folder) = picked {
+                    let path = folder.to_string_lossy().into_owned();
+                    let added = self.state.projects.iter().any(|p| configs::same_path(&p.path, &path));
+                    send(webview, json!({ "type": "setupFolderPicked", "index": index, "path": path, "added": added }));
+                }
+            }
+            Command::ImportSetup { items } => self.import_setup(items, webview),
             Command::ScanJetBrains => {
                 let keys = configs::node_host_keys();
                 if keys.is_empty() {
@@ -1303,34 +1349,7 @@ impl App {
             Command::NewChat { id, archived } => {
                 let _ = self.new_chat(&id, archived, None, webview);
             }
-            Command::CloseChat { id, archive } => {
-                let Some(chat) = state::chat_of(&id).and_then(|c| c.parse::<u32>().ok()) else { return };
-                let archive = archive != Some(false);
-                // The tab beside it takes its place, as in a browser: the one to its right, else the one to its left.
-                let next = self.state.project(&id).map(|p| state::tab_after_close(p, chat)).unwrap_or_else(|| state::project_of(&id).to_string());
-                self.stop(&id, Phase::Stopped);
-                self.runtime.remove(&id);
-                if let Some(p) = self.state.project_mut(&id) {
-                    if let Some(closed) = p.chats.iter().find(|c| c.id == chat).cloned() {
-                        p.last_chat = p.last_chat.max(chat);
-                        if archive {
-                            p.archived.push(state::ArchivedChat { id: chat, name: closed.name, archived_at: state::now_millis(), folder: closed.folder, branch: closed.branch });
-                        }
-                    }
-                    p.chats.retain(|c| c.id != chat);
-                }
-                if !archive {
-                    self.delete_chat_folder(&id, webview);
-                }
-                if self.active.as_deref() == Some(id.as_str()) {
-                    self.select(&next, webview);
-                    send(webview, json!({ "type": "select", "id": next }));
-                }
-                self.state.save(&self.paths);
-                self.push_projects(webview);
-                send(webview, json!({ "type": "removed", "id": id }));
-                send(webview, self.statuses());
-            }
+            Command::CloseChat { id, archive } => self.close_chat(&id, archive != Some(false), webview),
             Command::DeleteArchivedChat { id, chat } => {
                 let Some(p) = self.state.project_mut(&id) else { return };
                 if !p.archived.iter().any(|c| c.id == chat) {
@@ -1635,6 +1654,166 @@ impl App {
         self.select(&id, webview);
     }
 
+    /// Settings → Setup → Export: every codebase and its open chats to a file (setup.rs).
+    fn export_setup(&self, include_settings: bool, window: &Window, webview: &WebView) {
+        if self.state.projects.is_empty() {
+            send(webview, json!({ "type": "notice", "level": "info", "text": "There are no codebases to export yet." }));
+            return;
+        }
+        let file = setup::export(
+            &self.state,
+            state::now_millis(),
+            |id| self.vault.label_of(id),
+            |p| {
+                if !include_settings {
+                    return None;
+                }
+                let text = std::fs::read_to_string(&p.config_file).ok()?;
+                serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')).ok().filter(Value::is_object)
+            },
+        );
+        let Ok(text) = serde_json::to_string_pretty(&file) else { return };
+        let target = rfd::FileDialog::new()
+            .set_title("Save the Fire Code setup")
+            .set_file_name("fire-code-setup.json")
+            .add_filter("Fire Code setup", &["json"])
+            .set_parent(window)
+            .save_file();
+        let Some(target) = target else { return };
+        match std::fs::write(&target, text) {
+            Ok(()) => send(webview, json!({ "type": "notice", "level": "info", "text": format!(
+                "Exported {} codebase(s) to {}. No passwords or tokens are in it: export credentials separately (Settings → Credentials) if the other computer needs them.",
+                file.codebases.len(), target.display()) })),
+            Err(e) => send(webview, json!({ "type": "notice", "level": "error", "text": format!("Could not write {}: {e}", target.display()) })),
+        }
+    }
+
+    /// Settings → Setup → Import: reads the file and shows what it holds; nothing is added yet.
+    fn choose_setup_import(&mut self, window: &Window, webview: &WebView) {
+        let Some(file) = rfd::FileDialog::new()
+            .set_title("Import a Fire Code setup")
+            .add_filter("Fire Code setup", &["json"])
+            .set_parent(window)
+            .pick_file()
+        else {
+            return;
+        };
+        let parsed = std::fs::read_to_string(&file).map_err(|e| format!("Could not read {}: {e}", file.display())).and_then(|t| setup::parse(&t));
+        let setup = match parsed {
+            Ok(s) => s,
+            Err(text) => return send(webview, json!({ "type": "notice", "level": "error", "text": text })),
+        };
+        let items: Vec<Value> = setup
+            .codebases
+            .iter()
+            .map(|c| {
+                let hub = c.hub.as_ref().map(|h| {
+                    let found = h.credential_label.as_deref().and_then(|l| self.vault.find_label(l));
+                    json!({ "url": h.url, "user": h.user, "server": h.server, "folders": h.folders, "credentialLabel": h.credential_label, "credential": found })
+                });
+                let added = c.hub.is_none() && self.state.projects.iter().any(|p| configs::same_path(&p.path, &c.path));
+                json!({
+                    "name": c.name,
+                    "path": c.path,
+                    "exists": c.hub.is_none() && Path::new(&c.path).is_dir(),
+                    "added": added,
+                    "hub": hub,
+                    "chats": c.chats,
+                    "hasSettings": c.settings.is_some(),
+                })
+            })
+            .collect();
+        self.setup_import = Some(setup);
+        send(webview, json!({ "type": "setupPreview", "file": file.to_string_lossy(), "items": items }));
+    }
+
+    /// Adds the chosen codebases from the previewed setup, each with its chats under their names.
+    fn import_setup(&mut self, choices: Vec<SetupChoice>, webview: &WebView) {
+        let Some(setup) = self.setup_import.take() else { return };
+        let mut added: Vec<String> = Vec::new();
+        let mut problems: Vec<String> = Vec::new();
+        for choice in choices {
+            let Some(c) = setup.codebases.get(choice.index) else { continue };
+            match self.import_codebase(c, &choice) {
+                Ok(id) => added.push(id),
+                Err(text) => problems.push(format!("{}: {text}", c.name)),
+            }
+        }
+        if !added.is_empty() {
+            self.state.save(&self.paths);
+            self.push_projects(webview);
+            let first = added[0].clone();
+            self.select(&first, webview);
+            send(webview, json!({ "type": "select", "id": first }));
+        }
+        send(webview, json!({ "type": "setupImported", "added": added.len(), "problems": problems }));
+    }
+
+    fn import_codebase(&mut self, c: &setup::SetupCodebase, choice: &SetupChoice) -> Result<String, String> {
+        let id = state::new_id();
+        let (path, hub) = match &c.hub {
+            Some(h) => {
+                let input = hub::HubInput {
+                    url: h.url.clone(),
+                    user: h.user.clone(),
+                    server: h.server.clone(),
+                    folders: h.folders.clone(),
+                    kernel: h.kernel.clone(),
+                    token: choice.token.clone(),
+                    credential: choice.credential.clone(),
+                };
+                let mut settings = hub::validate(&input)?;
+                settings.credential = Some(self.hub_credential(&input, &settings, None)?);
+                let local = self.paths.hub_copy(&id);
+                std::fs::create_dir_all(&local).map_err(|e| format!("Could not create {}: {e}", local.display()))?;
+                (local.to_string_lossy().to_string(), Some(settings))
+            }
+            None => {
+                let path = choice.path.as_deref().map(str::trim).filter(|p| !p.is_empty()).unwrap_or(&c.path).to_string();
+                if !Path::new(&path).is_dir() {
+                    return Err(format!("{path} is not a folder on this computer. Choose where the codebase is."));
+                }
+                if self.state.projects.iter().any(|p| configs::same_path(&p.path, &path)) {
+                    return Err(format!("{path} is already in Fire Code; left as it is."));
+                }
+                (path, None)
+            }
+        };
+        let (config_file, _) = self.resolve_config(&id, ConfigMode::New, None)?;
+        if choice.settings {
+            if let Some(settings) = &c.settings {
+                let text = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+                state::write_atomic(Path::new(&config_file), &text)?;
+            }
+        }
+        let first_chat_name = c.chats.first().filter(|n| n.as_str() != "Chat 1").cloned();
+        let chats: Vec<state::Chat> = c
+            .chats
+            .iter()
+            .skip(1)
+            .enumerate()
+            .map(|(i, name)| state::Chat { id: i as u32 + 2, name: name.clone(), folder: None, branch: None })
+            .collect();
+        let last_chat = chats.last().map(|c| c.id).unwrap_or(0);
+        self.state.projects.push(Project {
+            id: id.clone(),
+            name: c.name.clone(),
+            path,
+            config_mode: ConfigMode::New,
+            config_file,
+            config_source: None,
+            keep_awake: c.keep_awake,
+            last_used: state::now_millis(),
+            accent: c.accent.clone(),
+            chats,
+            first_chat_name,
+            hub,
+            archived: Vec::new(),
+            last_chat,
+        });
+        Ok(id)
+    }
+
     fn update_hub(&mut self, id: &str, input: hub::HubInput, webview: &WebView) {
         let Some(previous) = self.state.project(id).and_then(|p| p.hub.clone()) else { return };
         let result = hub::validate(&input).and_then(|mut settings| {
@@ -1713,6 +1892,8 @@ impl App {
             return;
         }
         rt.generation += 1;
+        // Consumed by this start: a later Restart of a run that ended normally resumes nothing.
+        let resume_interrupted = std::mem::take(&mut rt.crashed);
         rt.phase = Phase::Starting;
         rt.agent = "idle".into();
         rt.error = None;
@@ -1747,6 +1928,7 @@ impl App {
             env: environment.vars,
             path: environment.path,
             no_schedules: state::chat_of(id).is_some(),
+            resume_interrupted,
             change_ledger: self.paths.project_dir(state::project_of(id)).join("changes.jsonl"),
             mirror_dir: self.paths.root.join("mirrors"),
             codebase_dir: self.paths.codebase_dir(id),
@@ -1835,6 +2017,41 @@ impl App {
     /// Another chat on a codebase - blank, or an archived one (`archived`, its number) brought back - opened on
     /// screen. `name` names a blank one ("Alert: ..." from monitoring). Its key, `<id>~<n>`.
     pub fn new_chat(&mut self, id: &str, archived: Option<u32>, name: Option<String>, webview: &WebView) -> Option<String> {
+        self.new_chat_with(id, archived, name, true, webview)
+    }
+
+    /// Closes a chat tab: archived (kept in History) or deleted with its folder. The tab beside it takes its place.
+    pub fn close_chat(&mut self, id: &str, archive: bool, webview: &WebView) {
+        let id = id.to_string();
+        let Some(chat) = state::chat_of(&id).and_then(|c| c.parse::<u32>().ok()) else { return };
+        // The tab beside it takes its place, as in a browser: the one to its right, else the one to its left.
+        let next = self.state.project(&id).map(|p| state::tab_after_close(p, chat)).unwrap_or_else(|| state::project_of(&id).to_string());
+        self.stop(&id, Phase::Stopped);
+        self.runtime.remove(&id);
+        if let Some(p) = self.state.project_mut(&id) {
+            if let Some(closed) = p.chats.iter().find(|c| c.id == chat).cloned() {
+                p.last_chat = p.last_chat.max(chat);
+                if archive {
+                    p.archived.push(state::ArchivedChat { id: chat, name: closed.name, archived_at: state::now_millis(), folder: closed.folder, branch: closed.branch });
+                }
+            }
+            p.chats.retain(|c| c.id != chat);
+        }
+        if !archive {
+            self.delete_chat_folder(&id, webview);
+        }
+        if self.active.as_deref() == Some(id.as_str()) {
+            self.select(&next, webview);
+            send(webview, json!({ "type": "select", "id": next }));
+        }
+        self.state.save(&self.paths);
+        self.push_projects(webview);
+        send(webview, json!({ "type": "removed", "id": id }));
+        send(webview, self.statuses());
+    }
+
+    /// `focus`: show it. False for a chat opened on another agent's request, which must not take over the screen.
+    pub fn new_chat_with(&mut self, id: &str, archived: Option<u32>, name: Option<String>, focus: bool, webview: &WebView) -> Option<String> {
         let on_disk = state::chat_numbers_on_disk(&self.paths.project_dir(state::project_of(id)));
         let p = self.state.project_mut(id)?;
         let next = match archived.and_then(|n| p.archived.iter().position(|c| c.id == n)) {
@@ -1855,8 +2072,12 @@ impl App {
         let key = format!("{}~{}", p.id, next);
         self.state.save(&self.paths);
         self.push_projects(webview);
-        self.select(&key, webview);
-        send(webview, json!({ "type": "select", "id": key }));
+        if focus {
+            self.select(&key, webview);
+            send(webview, json!({ "type": "select", "id": key }));
+        } else {
+            self.start(&key, webview);
+        }
         Some(key)
     }
 
@@ -1910,8 +2131,11 @@ impl App {
                 rt.url = Some(url.clone());
                 send(webview, json!({ "type": "url", "id": id, "url": url }));
                 send(webview, self.statuses());
+                self.flush_agent_tasks(&id);
             }
             HostEvent::Exited { id, generation, code, tail } => {
+                // Whatever this host was asked by another agent will not be answered now; what it asked is dropped.
+                self.agent_host_exited(&id, webview);
                 let Some(rt) = self.runtime.get_mut(&id) else { return };
                 if rt.generation != generation {
                     return;
@@ -1919,9 +2143,23 @@ impl App {
                 rt.process = None;
                 rt.url = None;
                 rt.phase = Phase::Failed;
+                rt.crashed = true;
+                // Kept before anything restarts it: the next start moves this run's log aside, and the
+                // one after that overwrites it (reported - the crash was never in the log being read).
+                let kept = host::keep_crash_log(&self.paths.log_file(&id));
+                let report = host::recent_crash_report(&self.paths.project_dir(&id));
+                let mut found = String::new();
+                if let Some(kept) = &kept {
+                    found.push_str(&format!("\nThis run's log is kept at {}", kept.display()));
+                }
+                if let Some(report) = &report {
+                    found.push_str(&format!("\nNode wrote a crash report: {}", report.display()));
+                }
                 rt.error = Some(format!(
-                    "The agent process stopped{}.\n\n{}",
+                    "The agent process stopped{}. {}{}\nRestart it and it carries on with the turn it was in.\n\n{}",
                     code.map(|c| format!(" (exit code {c})")).unwrap_or_default(),
+                    host::describe_exit(code),
+                    found,
                     tail
                 ));
                 send(webview, json!({ "type": "unload", "id": id }));
@@ -1930,7 +2168,7 @@ impl App {
                     if let Some(title) = self.state.chat_title(&id) {
                         let proxy = self.proxy.clone();
                         let pid = id.clone();
-                        system::notify(&title, "The agent stopped unexpectedly.", Some("Open Fire Code to see why and restart it."), &self.icon_file, &[], move |action| {
+                        system::notify(&title, "The agent stopped unexpectedly.", Some("Restart it in Fire Code and it carries on with what it was doing."), &self.icon_file, &[], move |action| {
                             let _ = proxy.send_event(UserEvent::Toast { id: pid.clone(), action });
                         });
                     }
@@ -2024,6 +2262,7 @@ impl App {
     fn tick(&mut self, window: &Window, webview: &WebView) {
         self.update_title(window);
         self.monitor_tick(webview);
+        self.archive_answered_agent_tabs(webview);
         self.ticks += 1;
         for rt in self.runtime.values_mut() {
             rt.memory = rt.process.as_ref().map(|p| p.memory()).unwrap_or(0);

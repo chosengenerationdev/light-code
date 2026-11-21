@@ -244,6 +244,12 @@ export interface ToolCall {
   name: string
   /** Raw JSON string — the tool executor parses and validates it, not the provider. */
   arguments: string
+  /**
+   * The provider's opaque token for this call, returned with it in the next request: Gemini's thought
+   * signature (`geminiCompat.ts`). Absent for every other provider. Kept with the conversation, so a
+   * chat reopened from history still has it.
+   */
+  signature?: string
 }
 
 /**

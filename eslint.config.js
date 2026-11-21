@@ -99,12 +99,23 @@ export default tseslint.config(
       'packages/core/src/tools/http.test.ts',
       // A stand-in model on loopback for the handoff test. Ingress only; the host reaches it through HttpClient.
       'apps/host/src/handoff.test.ts',
+      // Two hosts over one data folder, the second resuming a chat cut off mid-turn. Ingress only.
+      'apps/host/src/resumeInterrupted.test.ts',
       // The same, for a strategy end to end: the main agent and its specialists played by one loopback model.
       'apps/host/src/strategyEndToEnd.test.ts',
+      // A strategy kept with its chat across host restarts, against a loopback model. Ingress only.
+      'apps/host/src/strategyPerChat.test.ts',
+      'apps/host/src/decisionModel.test.ts',
+      'apps/host/src/personalDir.test.ts',
+      'packages/core/src/webchat/chromeReal.test.ts',
+      // The same, for two codebases' agents asking each other through a stand-in relay.
+      'apps/host/src/codebaseAgents.test.ts',
       // A stand-in model on loopback for the real `fire-fs watch` to call. Ingress only.
       'packages/core/src/observers/watch.test.ts',
       // A stand-in model on loopback for the real `fire-fs agent`. Ingress only.
       'packages/core/src/agents/roleProcess.test.ts',
+      // A stand-in for Google's paged `/models`, for the model chooser. Ingress only.
+      'apps/host/src/modelChooser.test.ts',
     ],
     rules: { 'no-restricted-imports': 'off' },
   },
@@ -138,11 +149,20 @@ export default tseslint.config(
       'apps/host/src/choosesTheme.test.ts',
       'apps/host/src/localTabs.test.ts',
       'apps/host/src/panelEditor.test.ts',
+      'apps/host/src/modelChooser.test.ts',
       // The draft kept across a host restart: a second server on the same data folder.
       'apps/host/src/composerDraft.test.ts',
       'apps/host/src/addonEnable.test.ts',
       'apps/host/src/handoff.test.ts',
+      // Two hosts over one data folder, the second resuming a chat cut off mid-turn. Ingress only.
+      'apps/host/src/resumeInterrupted.test.ts',
       'apps/host/src/strategyEndToEnd.test.ts',
+      'apps/host/src/strategyPerChat.test.ts',
+      'apps/host/src/decisionModel.test.ts',
+      'apps/host/src/personalDir.test.ts',
+      'packages/core/src/webchat/chromeReal.test.ts',
+      // The same, for two codebases' agents asking each other through a stand-in relay.
+      'apps/host/src/codebaseAgents.test.ts',
     ],
     rules: { 'no-restricted-globals': 'off' },
   },

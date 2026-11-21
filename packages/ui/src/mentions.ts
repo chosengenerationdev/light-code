@@ -58,6 +58,14 @@ export function addMentions(text: string, paths: string[]): string {
   return `${fresh.join(' ')} ${text.replace(/^\s+/, '')}`
 }
 
+/**
+ * A codebase (`name:`) or a folder (`src/abc/`): choosing it keeps the picker open inside it. Not a
+ * folder with a space in its name - that is written in quotes, and typing on would land outside them.
+ */
+export function opensInside(candidatePath: string): boolean {
+  return (candidatePath.endsWith(':') || candidatePath.endsWith('/')) && !candidatePath.includes(' ')
+}
+
 /** Paths containing spaces are quoted, so the resolver reads them as a single target. */
 export function renderMention(candidatePath: string): string {
   return candidatePath.includes(' ') ? `@"${candidatePath}"` : `@${candidatePath}`
@@ -82,8 +90,8 @@ export function insertMention(text: string, caret: number, candidatePath: string
   if (at === -1) return undefined
 
   const rendered = renderMention(candidatePath)
-  // `payments-api:` is a codebase, not a file: no space, so the picker carries on inside it.
-  const space = candidatePath.endsWith(':') ? '' : ' '
+  // `payments-api:` is a codebase and `src/abc/` a folder: no space, so the picker carries on inside.
+  const space = opensInside(candidatePath) ? '' : ' '
   return {
     text: `${text.slice(0, at)}${rendered}${space}${text.slice(caret)}`,
     caret: at + rendered.length + space.length,

@@ -28,6 +28,8 @@ mod directory;
 mod observer;
 #[path = "../role_agent.rs"]
 mod role_agent;
+#[path = "../library.rs"]
+mod library;
 
 use rayon::prelude::*;
 use serde_json::{json, Map, Value};
@@ -63,10 +65,10 @@ fn main() {
 
 /// Every operation `run` answers. A host asks with `capabilities` and offers only matching tools.
 #[cfg(feature = "dataframe")]
-const OPS: &[&str] = &["find", "summary", "duplicates", "readMany", "inspect", "lines", "tail", "grep", "table", "transfer", "archive", "names", "sqlite", "pypool", "dataframe", "search", "usage", "directory", "watch", "agent", "capabilities"];
+const OPS: &[&str] = &["find", "summary", "duplicates", "readMany", "inspect", "lines", "tail", "grep", "table", "transfer", "archive", "names", "sqlite", "pypool", "dataframe", "search", "usage", "directory", "watch", "agent", "library", "capabilities"];
 /// The slim helper bundled with the VS Code extension: everything but Polars.
 #[cfg(not(feature = "dataframe"))]
-const OPS: &[&str] = &["find", "summary", "duplicates", "readMany", "inspect", "lines", "tail", "grep", "table", "transfer", "archive", "names", "sqlite", "pypool", "search", "usage", "directory", "watch", "agent", "capabilities"];
+const OPS: &[&str] = &["find", "summary", "duplicates", "readMany", "inspect", "lines", "tail", "grep", "table", "transfer", "archive", "names", "sqlite", "pypool", "search", "usage", "directory", "watch", "agent", "library", "capabilities"];
 
 fn run(r: &Value) -> Result<Value, String> {
     match r.get("op").and_then(Value::as_str).unwrap_or("") {
@@ -89,6 +91,8 @@ fn run(r: &Value) -> Result<Value, String> {
         "dataframe" => dataframe::run(r),
         "usage" => usage_store::run(r),
         "directory" => directory::run(r),
+        // Every skill and Python-tool file in a set of folders, read at once (`library.rs`).
+        "library" => library::run(r),
         // What this helper can do, so a host built for a newer helper offers only the tools it has.
         "capabilities" => Ok(json!({ "ok": true, "version": env!("CARGO_PKG_VERSION"), "ops": OPS })),
         other => Err(format!("Unknown operation \"{other}\".")),
@@ -1544,6 +1548,8 @@ fn names(r: &Value) -> Result<Value, String> {
     let root = PathBuf::from(s(r, "root").ok_or("Name the folder to search.")?);
     let needle = s(r, "needle").unwrap_or("").to_lowercase();
     let prefix = s(r, "mode") == Some("prefix");
+    // Folders whose name matches instead of files - the `@` picker matching folder names.
+    let folders = r.get("folders").and_then(Value::as_bool).unwrap_or(false);
     let depth = r.get("depth").and_then(Value::as_u64).map(|d| d as usize);
     let limit = u(r, "limit", 2000).min(20_000) as usize;
     let exclude: std::collections::HashSet<String> = strings(r, "exclude").into_iter().map(|e| e.to_lowercase()).collect();
@@ -1571,7 +1577,12 @@ fn names(r: &Value) -> Result<Value, String> {
                 return ignore::WalkState::Quit;
             }
             let Ok(entry) = result else { return ignore::WalkState::Continue };
-            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            let kind_matches = if folders {
+                entry.depth() > 0 && entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+            } else {
+                entry.file_type().map(|t| t.is_file()).unwrap_or(false)
+            };
+            if !kind_matches {
                 return ignore::WalkState::Continue;
             }
             if depth.map(|d| entry.depth() != d + 1).unwrap_or(false) {
@@ -1591,7 +1602,7 @@ fn names(r: &Value) -> Result<Value, String> {
         })
     });
     let paths = found.into_inner().unwrap();
-    Ok(json!({ "ok": true, "limitReached": paths.len() >= limit, "paths": paths }))
+    Ok(json!({ "ok": true, "limitReached": paths.len() >= limit, "paths": paths, "folders": folders }))
 }
 
 #[cfg(test)]
@@ -1621,6 +1632,9 @@ mod names_tests {
         assert_eq!(ask(json!({})), vec!["buildings/abc_plan.txt", "fct/src/abc/abc_report.py", "fct/src/jobs/bat/abc_report.bat"]);
         assert_eq!(ask(json!({ "mode": "prefix", "depth": 3 })), vec!["fct/src/abc/abc_report.py"]);
         assert_eq!(ask(json!({ "mode": "prefix", "depth": 1 })), vec!["buildings/abc_plan.txt"]);
+        // Folders by name: `generated` is ignored, `build` excluded, files never listed.
+        std::fs::create_dir_all(base.join("fct/src/abc_reports/x")).unwrap();
+        assert_eq!(ask(json!({ "folders": true })), vec!["fct/src/abc", "fct/src/abc_reports"]);
         let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -11,6 +11,9 @@ export interface TokenBarProps {
   /** Whether history is compacted by itself near the limit. Absent hides the switch. */
   autoCompact?: boolean | undefined
   onSetAutoCompact?: ((value: boolean) => void) | undefined
+  /** Whether a chat at its limit hands off to a new chat by itself. Absent hides the switch. */
+  autoHandoff?: boolean | undefined
+  onSetAutoHandoff?: ((value: boolean) => void) | undefined
 }
 
 const SEGMENTS = [
@@ -82,10 +85,31 @@ export function TokenBar(props: TokenBarProps): ReactElement | null {
               <input
                 type="checkbox"
                 checked={props.autoCompact === true}
-                onChange={(event) => props.onSetAutoCompact?.(event.target.checked)}
+                onChange={(event) => {
+                  // One or the other: at the limit a chat is either summarised or handed over.
+                  if (event.target.checked && props.autoHandoff === true) props.onSetAutoHandoff?.(false)
+                  props.onSetAutoCompact?.(event.target.checked)
+                }}
                 style={{ margin: 0 }}
               />
               Compact automatically
+            </label>
+          )}
+          {props.onSetAutoHandoff !== undefined && (
+            <label
+              title="On: when this chat reaches the context limit, the assistant writes a handoff and a new chat starts from it and carries on by itself - this chat stays in History. Off: you choose when (New chat with a handoff, beside + at the top)."
+              style={{ display: 'flex', alignItems: 'center', gap: 4, color: colors.muted, cursor: 'pointer' }}
+            >
+              <input
+                type="checkbox"
+                checked={props.autoHandoff === true}
+                onChange={(event) => {
+                  if (event.target.checked && props.autoCompact === true) props.onSetAutoCompact?.(false)
+                  props.onSetAutoHandoff?.(event.target.checked)
+                }}
+                style={{ margin: 0 }}
+              />
+              Hand off automatically
             </label>
           )}
           <button

@@ -1,6 +1,7 @@
 import type { Logger } from '../logging/logger.js'
 import type { HttpClient, HttpRequestOptions, HttpResponse } from '../platform/http.js'
 import { describeTlsError } from './auth/apigeeMtls.js'
+import { isGeminiModel, requiresSignature, restoreArguments, SKIP_SIGNATURE, toGeminiCompatTools, type Reshaped } from './geminiCompat.js'
 import { toOpenAITools } from './schema.js'
 import { applyThinking } from './thinking.js'
 import { ThinkTagSplitter } from './thinkTags.js'
@@ -20,8 +21,17 @@ function describeRequestError(error: unknown, url: string): string {
   return `Could not reach ${url}: ${describeTlsError(error)}`
 }
 
+/**
+ * What differs on the wire for Gemini (`geminiCompat.ts`). Undefined for every other model, and then
+ * nothing here changes - the condition the Gemini work was asked for under, with Qwen in daily use.
+ */
+interface GeminiWire {
+  /** Whether a call without a signature gets the skip placeholder (Gemini 3 and later). */
+  requiresSignature: boolean
+}
+
 /** Maps our `ChatMessage` union to OpenAI's wire format for the `messages` array. */
-function toWireMessage(message: ChatMessage): Record<string, unknown> {
+function toWireMessage(message: ChatMessage, gemini?: GeminiWire): Record<string, unknown> {
   if (message.role === 'user' && message.images !== undefined && message.images.length > 0) {
     // OpenAI takes images as a `content` parts array with data URLs — note this is a
     // different encoding from Anthropic's `{media_type, data}` and Gemini's `inlineData`,
@@ -37,16 +47,20 @@ function toWireMessage(message: ChatMessage): Record<string, unknown> {
     const wire: Record<string, unknown> = { role: 'assistant', content: message.content }
     if (message.toolCalls !== undefined && message.toolCalls.length > 0) {
       wire.content = message.content.length > 0 ? message.content : null
-      wire.tool_calls = message.toolCalls.map((call) => ({
-        id: call.id,
-        type: 'function',
-        function: { name: call.name, arguments: call.arguments },
-      }))
+      wire.tool_calls = message.toolCalls.map((call) => {
+        const entry: Record<string, unknown> = { id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } }
+        // Gemini refuses a request whose earlier calls come back without their signatures.
+        const signature = call.signature ?? (gemini?.requiresSignature === true ? SKIP_SIGNATURE : undefined)
+        if (gemini !== undefined && signature !== undefined) entry.extra_content = { google: { thought_signature: signature } }
+        return entry
+      })
     }
     return wire
   }
   if (message.role === 'tool') {
-    return { role: 'tool', tool_call_id: message.toolCallId, content: message.content }
+    // Gemini refuses an empty function response; a tool that printed nothing still answered.
+    const content = gemini !== undefined && message.content.length === 0 ? '(no output)' : message.content
+    return { role: 'tool', tool_call_id: message.toolCallId, content }
   }
   return { role: message.role, content: message.content }
 }
@@ -64,13 +78,23 @@ export class OpenAIProvider implements ChatProvider {
     const url = `${this.profile.baseUrl.replace(/\/+$/, '')}/chat/completions`
     this.logger?.debug('POST', url, `model=${this.profile.model}`)
 
+    const gemini: GeminiWire | undefined = isGeminiModel(this.profile.model, this.profile.baseUrl)
+      ? { requiresSignature: requiresSignature(this.profile.model) }
+      : undefined
     const body: Record<string, unknown> = {
       model: this.profile.model,
-      messages: messages.map(toWireMessage),
+      messages: messages.map((message) => toWireMessage(message, gemini)),
       stream: true,
     }
+    let reshaped: Map<string, Reshaped[]> | undefined
     if (options.tools !== undefined && options.tools.length > 0) {
-      body.tools = toOpenAITools(options.tools)
+      if (gemini !== undefined) {
+        const converted = toGeminiCompatTools(options.tools)
+        body.tools = converted.tools
+        reshaped = converted.reshaped
+      } else {
+        body.tools = toOpenAITools(options.tools)
+      }
       body.tool_choice = 'auto'
     }
     // The real token count, in a last chunk (OpenAI, vLLM, most gateways). A gateway that refuses the field is
@@ -80,6 +104,15 @@ export class OpenAIProvider implements ChatProvider {
     if (this.profile.temperature !== undefined) body.temperature = this.profile.temperature
     if (this.profile.topP !== undefined) body.top_p = this.profile.topP
     applyThinking(body, 'openai', this.profile.thinking, this.profile.maxTokens)
+    /*
+     * Gemini thinks with `reasoning_effort` like any reasoning model, but shows nothing of it unless
+     * asked. Asked only when thinking is switched on for the profile, and dropped for good if the
+     * gateway refuses the field - the same treatment as `stream_options`.
+     */
+    const thoughtsKey = `${usageKey}|thoughts`
+    if (gemini !== undefined && this.profile.thinking !== undefined && this.profile.thinking.level !== 'off' && !NO_STREAM_USAGE.has(thoughtsKey)) {
+      body.extra_body = { google: { thinking_config: { include_thoughts: true } } }
+    }
 
     let response: HttpResponse
     try {
@@ -88,11 +121,15 @@ export class OpenAIProvider implements ChatProvider {
       await this.auth.ensureTokenForStream?.()
       response = await this.send(url, body, options.signal)
 
-      if (response.status >= 400 && response.status < 500 && response.status !== 401 && body.stream_options !== undefined) {
+      if (response.status >= 400 && response.status < 500 && response.status !== 401 && (body.stream_options !== undefined || body.extra_body !== undefined)) {
         const text = await response.text().catch(() => '')
-        if (/stream_options|include_usage/i.test(text)) {
+        if (body.stream_options !== undefined && /stream_options|include_usage/i.test(text)) {
           NO_STREAM_USAGE.add(usageKey)
           delete body.stream_options
+          response = await this.send(url, body, options.signal)
+        } else if (body.extra_body !== undefined && /extra_body|thinking_config|include_thoughts/i.test(text)) {
+          NO_STREAM_USAGE.add(thoughtsKey)
+          delete body.extra_body
           response = await this.send(url, body, options.signal)
         } else {
           yield { type: 'error', error: `Request to ${url} failed with HTTP ${response.status}${text ? `: ${text.slice(0, 500)}` : ''}` }
@@ -128,7 +165,7 @@ export class OpenAIProvider implements ChatProvider {
       return
     }
 
-    yield* parseSseStream(response.body, url, options.signal, this.logger)
+    yield* parseSseStream(response.body, url, options.signal, this.logger, gemini !== undefined ? { reshaped } : undefined)
   }
 
   private async send(url: string, body: Record<string, unknown>, signal: AbortSignal | undefined): Promise<HttpResponse> {
@@ -165,6 +202,12 @@ interface ToolCallAccumulator {
   id: string
   name: string
   arguments: string
+  signature?: string
+}
+
+/** Gemini's stream, read as Gemini sends it (`geminiCompat.ts`). Absent for every other model. */
+interface GeminiStream {
+  reshaped: Map<string, Reshaped[]> | undefined
 }
 
 interface ParsedChoice {
@@ -182,24 +225,52 @@ function extractChoice(parsed: unknown): ParsedChoice | undefined {
   return { delta, finishReason }
 }
 
-function accumulateToolCallDeltas(accumulators: Map<number, ToolCallAccumulator>, toolCallsDelta: unknown): void {
+function accumulateToolCallDeltas(accumulators: Map<number, ToolCallAccumulator>, toolCallsDelta: unknown, gemini?: GeminiStream): void {
   if (!Array.isArray(toolCallsDelta)) return
   for (const raw of toolCallsDelta) {
     if (typeof raw !== 'object' || raw === null) continue
-    const entry = raw as { index?: unknown; id?: unknown; function?: { name?: unknown; arguments?: unknown } }
-    const index = typeof entry.index === 'number' ? entry.index : 0
+    const entry = raw as {
+      index?: unknown
+      id?: unknown
+      function?: { name?: unknown; arguments?: unknown }
+      extra_content?: { google?: { thought_signature?: unknown } }
+    }
+    const index = typeof entry.index === 'number' ? entry.index : gemini !== undefined ? geminiIndex(accumulators, entry) : 0
     const existing = accumulators.get(index) ?? { id: '', name: '', arguments: '' }
     if (typeof entry.id === 'string') existing.id = entry.id
     if (typeof entry.function?.name === 'string') existing.name = entry.function.name
     if (typeof entry.function?.arguments === 'string') existing.arguments += entry.function.arguments
+    const signature = entry.extra_content?.google?.thought_signature
+    if (gemini !== undefined && typeof signature === 'string' && signature.length > 0) existing.signature = signature
     accumulators.set(index, existing)
   }
 }
 
-function* completedToolCalls(accumulators: Map<number, ToolCallAccumulator>): Generator<ToolCall> {
+/**
+ * Where a Gemini call without an `index` belongs: with the call of the same id, else a new slot when it
+ * names a function (Gemini sends each parallel call whole), else the last one (a continuation).
+ */
+function geminiIndex(accumulators: Map<number, ToolCallAccumulator>, entry: { id?: unknown; function?: { name?: unknown } }): number {
+  if (typeof entry.id === 'string' && entry.id.length > 0) {
+    for (const [index, call] of accumulators) if (call.id === entry.id) return index
+  }
+  if (typeof entry.function?.name === 'string' && entry.function.name.length > 0) return accumulators.size
+  return Math.max(0, accumulators.size - 1)
+}
+
+function* completedToolCalls(accumulators: Map<number, ToolCallAccumulator>, gemini?: GeminiStream): Generator<ToolCall> {
+  let position = 0
   for (const call of accumulators.values()) {
-    if (call.id.length > 0 && call.name.length > 0) {
-      yield { id: call.id, name: call.name, arguments: call.arguments }
+    position += 1
+    // Gemini may leave out the id; everything after this pairs a result with its call by id.
+    const id = call.id.length > 0 ? call.id : gemini !== undefined ? `call_${String(Date.now())}_${String(position)}` : ''
+    if (id.length > 0 && call.name.length > 0) {
+      yield {
+        id,
+        name: call.name,
+        arguments: gemini !== undefined ? restoreArguments(call.arguments, gemini.reshaped?.get(call.name)) : call.arguments,
+        ...(call.signature !== undefined ? { signature: call.signature } : {}),
+      }
     }
   }
 }
@@ -209,11 +280,13 @@ async function* parseSseStream(
   url: string,
   signal: AbortSignal | undefined,
   logger: Logger | undefined,
+  gemini?: GeminiStream,
 ): AsyncGenerator<StreamChunk> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  const thinking = new ThinkTagSplitter()
+  // Gemini's thoughts, when asked for over this endpoint, arrive in the content as `<thought>` tags.
+  const thinking = new ThinkTagSplitter(gemini !== undefined ? 'thought' : 'think')
   const toolCallAccumulators = new Map<number, ToolCallAccumulator>()
   // After a tool call, the usage chunk is still to come: read on for it, but briefly - a gateway that never
   // closes the stream must not turn a finished reply into a stalled one.
@@ -254,6 +327,7 @@ async function* parseSseStream(
 
         const data = trimmed.slice('data:'.length).trim()
         if (data === '[DONE]') {
+          yield* unannouncedToolCalls()
           yield { type: 'done' }
           return
         }
@@ -289,10 +363,10 @@ async function* parseSseStream(
             if (split.reasoning.length > 0) yield { type: 'reasoning', text: split.reasoning }
             if (split.text.length > 0) yield { type: 'text', text: split.text }
           }
-          accumulateToolCallDeltas(toolCallAccumulators, choice.delta.tool_calls)
+          accumulateToolCallDeltas(toolCallAccumulators, choice.delta.tool_calls, gemini)
 
           if (choice.finishReason === 'tool_calls' && finishedAt === undefined) {
-            for (const toolCall of completedToolCalls(toolCallAccumulators)) {
+            for (const toolCall of completedToolCalls(toolCallAccumulators, gemini)) {
               yield { type: 'toolCall', toolCall }
             }
             finishedAt = Date.now()
@@ -302,6 +376,7 @@ async function* parseSseStream(
         }
       }
     }
+    yield* unannouncedToolCalls()
     yield { type: 'done' }
   } catch (error) {
     if (signal?.aborted) {
@@ -311,5 +386,16 @@ async function* parseSseStream(
     }
   } finally {
     reader.releaseLock()
+  }
+
+  /*
+   * Tool calls the stream made but never announced with `finish_reason: "tool_calls"`: Gemini ends such a
+   * stream with "stop", and so do some vLLM builds. They used to be dropped, which reads as the model
+   * describing a step and then doing nothing. A stream that did announce them yields nothing more here.
+   */
+  function* unannouncedToolCalls(): Generator<StreamChunk> {
+    if (finishedAt !== undefined) return
+    finishedAt = Date.now()
+    for (const toolCall of completedToolCalls(toolCallAccumulators, gemini)) yield { type: 'toolCall', toolCall }
   }
 }

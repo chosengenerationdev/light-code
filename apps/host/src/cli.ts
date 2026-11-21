@@ -19,6 +19,7 @@ const VERSION =
  * repository. `nodeCompat.test.ts` asserts this import stays at the top.
  */
 import { installNodeCompat } from './nodeCompat.js'
+import { installCrashDiagnostics } from './crashDiagnostics.js'
 import { publicAddressFor, publicLaunchUrl } from './publicUrl.js'
 
 const compat = installNodeCompat()
@@ -76,6 +77,14 @@ function lastMeaningfulLine(problem: string): string {
  * those terms.
  */
 async function main(): Promise<void> {
+  /*
+   * More of Node's background threads, set before anything uses them. File reads, DNS lookups and some crypto share
+   * one small pool (4 by default): one slow network path or a slow name lookup can hold all four, and every other
+   * file read waits behind it. Reported: a chat took four and a half minutes to load its skills and Python tools -
+   * plain file reads, finishing together, the shape of a starved pool. Only takes effect if set this early; a value
+   * the user set themselves is kept.
+   */
+  process.env['UV_THREADPOOL_SIZE'] ??= '32'
   const args = process.argv.slice(2)
   if (args.includes('--help') || args.includes('-h')) {
     process.stdout.write(usage())
@@ -283,6 +292,8 @@ async function main(): Promise<void> {
    */
   const control = args.includes('--control-stdin') && !args.includes('--server') ? new StdioControl() : undefined
   control?.start(stdinRest)
+  // Fire Code only, like the channel: a crash there is read from the log after the fact.
+  if (control !== undefined) installCrashDiagnostics(dataDir)
   const extraToolDirs = args.flatMap((arg, i) => (arg === '--extra-tool-folder' && args[i + 1] !== undefined ? [path.resolve(args[i + 1] as string)] : []))
   const fastFsArg = valueOf(args, '--fast-fs')
   /** The slim helper this package carries on Windows (`dist/bin`), used when Fire Code's is not installed. */
@@ -464,9 +475,12 @@ async function main(): Promise<void> {
     ...(fastFs !== undefined ? { fastFs } : {}),
     // Fire Code's monitoring: the agent's tools while it is on, and the background executor.
     ...(control !== undefined && args.includes('--monitoring') ? { monitoring: control.channel() } : {}),
+    // Asking the other codebases' agents, and answering theirs: Fire Code relays both (agents/codebaseAgents.ts).
+    ...(control !== undefined ? { codebaseAgents: control.agents() } : {}),
     ...(control !== undefined && args.includes('--monitor-executor') ? { monitorExecutor: control.executor(), eagerSession: true } : {}),
     ...(extraToolDirs.length > 0 ? { extraToolDirs } : {}),
     ...(args.includes('--shared-workspace') ? { sharedWorkspace: true } : {}),
+    ...(args.includes('--resume-interrupted') ? { resumeInterrupted: true } : {}),
     ...(args.includes('--no-schedules') ? { noSchedules: true } : {}),
     ...(siblings.length > 0 ? { siblings } : {}),
     ...(mirrorDir !== undefined ? { mirrorRoot: path.resolve(mirrorDir) } : {}),
@@ -768,6 +782,7 @@ const KNOWN_FLAGS = new Set([
   '--reach-anywhere',
   '--fast-fs',
   '--shared-workspace',
+  '--resume-interrupted',
   '--no-schedules',
   '--sibling',
   '--change-ledger',
@@ -1043,6 +1058,8 @@ Usage: light-code [options]
   --reach-anywhere    Let the assistant read any drive or share and write
                       anywhere, asking every time it writes outside the
                       workspace (not with --server). Used by Fire Code
+  --resume-interrupted  Continue the turn the last run was cut off in (Fire Code
+                      passes it after the agent stopped unexpectedly)
   --shared-workspace  Other agents work in this folder too (Fire Code's
                       chat tabs): Rollback undoes only this chat's files
   --sibling <name>=<folder>  Another codebase the agent may read, mentioned as

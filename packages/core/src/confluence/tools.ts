@@ -112,7 +112,7 @@ export function createConfluenceSearchTool(options: ConfluenceToolOptions): Tool
 const readSchema = z.object({
   pageId: z.string().optional().describe('The page id, from confluence_search or a page URL.'),
   space: z.string().optional().describe('With `title`, find a page by its exact title in this space.'),
-  title: z.string().optional(),
+  title: z.string().optional().describe('With `space`: the exact page title.'),
   images: z
     .boolean()
     .optional()

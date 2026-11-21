@@ -76,3 +76,11 @@ describe('the prefix pass', () => {
     expect(mentionGlob('ab', 'prefix', 2)).toBe('*/*/[aA][bB]*')
   })
 })
+
+describe('foldersOf', () => {
+  it('recovers matching folders from file paths, under the root only', async () => {
+    const { foldersOf } = await import('./mentionGlob.js')
+    const files = ['/r/src/Quarterly/q3.xlsx', '/r/src/Quarterly/deep/a.md', '/r/quarter.md', '/elsewhere/quarter/x']
+    expect(foldersOf(files, 'quarter', '/r').sort()).toEqual(['/r/src/Quarterly'])
+  })
+})

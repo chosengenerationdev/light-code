@@ -64,17 +64,17 @@ export type ChartSeries = z.infer<typeof chartSeriesSchema>
 export const chartSpecSchema = z
   .object({
     type: z.enum(CHART_TYPES).describe('bar, stackedBar, groupedBar, line, multiLine or pie.'),
-    title: z.string().max(200).optional(),
+    title: z.string().max(200).optional().describe('A heading shown above the chart.'),
     categories: z
       .array(z.string())
       .min(1)
       .max(MAX_CATEGORIES)
       .describe('The x axis, or the pie slice labels. One per value in every series.'),
-    series: z.array(chartSeriesSchema).min(1).max(MAX_SERIES),
+    series: z.array(chartSeriesSchema).min(1).max(MAX_SERIES).describe('One or more named lists of numbers, each with one value per category.'),
     /** See `display/size.ts` — the same field and the same words as a diagram's. */
     size: z.enum(DISPLAY_SIZES).optional().describe(DISPLAY_SIZE_DESCRIPTION),
-    xLabel: z.string().max(80).optional(),
-    yLabel: z.string().max(80).optional(),
+    xLabel: z.string().max(80).optional().describe('The x axis title.'),
+    yLabel: z.string().max(80).optional().describe('The y axis title, with the unit.'),
     note: z
       .string()
       .max(500)

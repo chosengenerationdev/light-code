@@ -109,7 +109,7 @@ describe('the wiring', () => {
     expect(bridge).toContain('findDirectedRoles(text, cachedTeam)')
     expect(bridge).toContain('describeDirectedRoles(directed, cachedTeam)')
     const at = bridge.indexOf('findDirectedRoles(text, cachedTeam)')
-    const used = bridge.indexOf('const messageText', at)
+    const used = bridge.indexOf('let messageText', at)
     expect(used).toBeGreaterThan(at)
   })
 })

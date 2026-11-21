@@ -31,6 +31,11 @@ export class RestTransport {
      * of the backend rather than of the connection.
      */
     private readonly extraHeaders: () => Record<string, string> = () => ({}),
+    /**
+     * A sentence to add to a failure, judged from the body. The backends pass one that recognises a
+     * server of another kind answering - see `serverKind.ts`.
+     */
+    private readonly explain: (body: unknown) => string = () => '',
   ) {}
 
   get label(): string {
@@ -90,7 +95,8 @@ export class RestTransport {
     if (result.status < 200 || result.status >= 300) {
       const detail = typeof result.body === 'string' ? result.body : JSON.stringify(result.body ?? '')
       throw new VectorStoreError(
-        `${method} ${path} on ${this.label} returned HTTP ${String(result.status)}. ${detail.slice(0, 300)}`,
+        `${method} ${path} on ${this.label} returned HTTP ${String(result.status)}. ${detail.slice(0, 300)}` +
+          this.explain(result.body),
         result.status,
       )
     }

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 import type { Tool, ToolPreview, ToolResult } from '../tools/types.js'
-import type { Strategy, StrategyEdge } from './strategy.js'
+import { groupName, type Strategy, type StrategyEdge } from './strategy.js'
 
 /**
  * The main agent proposing what passes between two steps of the strategy - asked for together with checked
@@ -13,8 +13,8 @@ import type { Strategy, StrategyEdge } from './strategy.js'
  */
 
 const item = z.object({
-  from: z.string().min(1).describe('The role that hands over, e.g. "programmer".'),
-  to: z.string().min(1).describe('The role that receives it, e.g. "tester".'),
+  from: z.string().min(1).describe('The role that hands over, e.g. "programmer" - or a box\'s name, as the strategy text quotes it.'),
+  to: z.string().min(1).describe('The role that receives it, e.g. "tester" - or a box\'s name, as the strategy text quotes it.'),
   contract: z.string().max(1000).optional().describe('What passes along this connector, in a sentence.'),
   requires: z.array(z.string().trim().min(1).max(80)).max(10).optional().describe('The items the hand-over must contain, each a short name ("Changed files", "Tests run"). Light Code checks every one.'),
 })
@@ -25,9 +25,16 @@ const schema = z.object({
 
 export type SetStrategyContractsParams = z.infer<typeof schema>
 
-/** The connector joining `from` and `to` - in that direction, or either for a back-and-forth. */
+/**
+ * The connector joining `from` and `to` - in that direction, or either for a back-and-forth. An end that is a box is
+ * named by the box's label (as the strategy text shows it), lower-cased.
+ */
 function findEdge(strategy: Strategy, from: string, to: string): StrategyEdge | undefined {
-  const roleOf = (id: string): string | undefined => strategy.nodes.find((n) => n.id === id)?.role
+  const roleOf = (id: string): string | undefined =>
+    strategy.nodes.find((n) => n.id === id)?.role ?? (() => {
+      const group = strategy.groups?.find((g) => g.id === id)
+      return group === undefined ? undefined : groupName(group).toLowerCase()
+    })()
   return (
     strategy.edges.find((e) => roleOf(e.from) === from && roleOf(e.to) === to) ??
     strategy.edges.find((e) => e.twoWay === true && roleOf(e.from) === to && roleOf(e.to) === from)

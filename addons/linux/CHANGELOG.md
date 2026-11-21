@@ -1,5 +1,9 @@
 # @chosengeneration/light-code-addon-linux
 
+## 0.2.2
+
+- **Fixed: "Set up SSH key" could save a key that never works.** The SSH library makes an unreadable key about 4 times in 1,000; one kept would have been installed on the machine and then failed every sign-in for good. Each new key is now read back before it is kept, and made again if it cannot be.
+
 ## 0.2.1
 
 - **Fixed: signing in with Pageant.** It went through a helper program the SSH library starts (`pagent.exe`), which the bundled add-on did not carry - so it could not work - and which would have been a new program running on your PC. Pageant is now reached through its own named pipe, found automatically while it runs, with nothing started. Needs PuTTY 0.75 (2021) or later.

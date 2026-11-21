@@ -14,6 +14,9 @@ export interface ApprovalsTabProps {
   onRevokeCommand: (command: string) => void
   maxIterations: number
   onSetMaxIterations: (value: number) => void
+  /** No step limit for chat replies. Absent hides the switch. */
+  unlimitedSteps?: boolean | undefined
+  onSetUnlimitedSteps?: ((value: boolean) => void) | undefined
   /** Folders tools may read outside the workspace. */
   readRoots: string[]
   onSetReadRoots: (roots: string[]) => void
@@ -109,7 +112,7 @@ const CATEGORIES: { group: ApprovableGroup; label: string; description: string }
   { group: 'mcp', label: 'MCP tools', description: 'Tools provided by external MCP servers' },
 ]
 
-function Toggle(props: { checked: boolean; label: string; description: string; onChange: (v: boolean) => void }): ReactElement {
+export function Toggle(props: { checked: boolean; label: string; description: string; onChange: (v: boolean) => void }): ReactElement {
   return (
     <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 10, cursor: 'pointer' }}>
       <input
@@ -236,8 +239,16 @@ export function ApprovalsTab(props: ApprovalsTabProps): ReactElement {
       <ReadRootsSection roots={props.readRoots} onSave={props.onSetReadRoots} />
       </Panel>
 
-      <Panel id="approvals.steps" title="Maximum steps per message" summary={String(props.maxIterations)}>
-      <div>
+      <Panel id="approvals.steps" title="Maximum steps per message" summary={props.unlimitedSteps === true ? 'No limit' : String(props.maxIterations)}>
+      {props.onSetUnlimitedSteps !== undefined && (
+        <Toggle
+          checked={props.unlimitedSteps === true}
+          label="No step limit"
+          description="Let the agent run until it finishes the job, you press Stop, or it fails the same way three times in a row. Turn on the Anti Hallucinator (Settings → Project) to have its work watched and steered as it goes. Scheduled runs keep the limit below - nobody is there to stop them."
+          onChange={(enabled) => props.onSetUnlimitedSteps?.(enabled)}
+        />
+      )}
+      <div style={props.unlimitedSteps === true ? { opacity: 0.55 } : undefined}>
         <label htmlFor="lc-max-steps" style={labelStyle()}>
           Maximum steps per message
         </label>

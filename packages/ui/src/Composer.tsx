@@ -1,4 +1,4 @@
-import type { CheckpointView, ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
+import { nextWord, TYPE_AHEAD_MIN_CHARS, type CheckpointView, type ImageAttachmentInput, type ProfileSummary } from '@light-code/core/browser'
 import {
   useEffect,
   useRef,
@@ -14,10 +14,12 @@ import {
   activeRoleQuery,
   addMentions,
   insertMention as insertMentionInto,
+  opensInside,
   splitMentions,
 } from './mentions.js'
 import { PlanProgress } from './PlanProgress.js'
 import type { StageFile } from './stagedFiles.js'
+import { remainingSuggestion, type Complete } from './completions.js'
 import { Select } from './Select.js'
 import {
   badgeStyle,
@@ -79,6 +81,11 @@ export interface ComposerProps {
    * which saves it to a temporary folder and reads it. Absent in tests; such files are then refused.
    */
   stageFile?: StageFile | undefined
+  /**
+   * Grey suggestions while typing, from the chat's model (`composerCompletion`); absent when that is off. Tab takes the
+   * next word; Ctrl+Space, or Right arrow at the end, the whole suggestion; Esc hides it.
+   */
+  complete?: Complete | undefined
   /** The editor's file list ("Add files to context"); absent where there is no editor. */
   onPickFiles?: (() => void) | undefined
   /** Files to add as mentions, from the picker or the editor's menu; `nonce` makes a repeat land. */
@@ -279,6 +286,48 @@ export function Composer(props: ComposerProps): ReactElement {
   }, [])
 
   const showingMentions = mentionQuery !== undefined && props.mentionCandidates.length > 0
+
+  // Grey suggestions. The suggestion is kept with the text it was made for, so typing what it offers keeps the rest
+  // in view instead of making it flicker away and come back.
+  const [suggestion, setSuggestion] = useState<{ for: string; text: string } | undefined>(undefined)
+  const [caretAtEnd, setCaretAtEnd] = useState(true)
+  const ghostLayerRef = useRef<HTMLDivElement>(null)
+  const typedRef = useRef(text)
+  typedRef.current = text
+  const ghost =
+    props.complete !== undefined && suggestion !== undefined && caretAtEnd && mentionQuery === undefined && roleQuery === undefined
+      ? remainingSuggestion(suggestion.for, suggestion.text, text)
+      : ''
+  const ghostRef = useRef(ghost)
+  ghostRef.current = ghost
+  const complete = props.complete
+  useEffect(() => {
+    if (complete === undefined || !caretAtEnd || text.trim().length < TYPE_AHEAD_MIN_CHARS) return
+    // Still offering something for this text: no new request.
+    if (ghostRef.current.length > 0) return
+    const asked = text
+    const timer = setTimeout(() => {
+      void complete(asked).then((answer) => {
+        if (answer.length > 0 && typedRef.current === asked) setSuggestion({ for: asked, text: answer })
+      })
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [text, caretAtEnd, complete])
+
+  const acceptSuggestion = (part: string): void => {
+    const textarea = textareaRef.current
+    const next = text + part
+    setText(next)
+    requestAnimationFrame(() => {
+      if (textarea === null) return
+      textarea.focus()
+      textarea.setSelectionRange(next.length, next.length)
+      resize(textarea)
+    })
+  }
+  const syncCaret = (element: HTMLTextAreaElement): void => {
+    setCaretAtEnd(element.selectionStart === element.value.length && element.selectionEnd === element.value.length)
+  }
   // An empty picker looks exactly like a broken one, so a search that found nothing says so.
   const nothingMatches =
     mentionQuery !== undefined &&
@@ -395,7 +444,8 @@ export function Composer(props: ComposerProps): ReactElement {
 
     setText(inserted.text)
     // A codebase (`name:`) opens the picker inside it; a file closes it.
-    setMentionQuery(candidatePath.endsWith(':') ? candidatePath : undefined)
+    // A folder (`src/abc/`) does the same.
+    setMentionQuery(opensInside(candidatePath) ? candidatePath : undefined)
 
     // Restore the caret after the inserted mention rather than leaving it at the end.
     requestAnimationFrame(() => {
@@ -793,73 +843,123 @@ export function Composer(props: ComposerProps): ReactElement {
           borderRadius: 12,
         }}
       >
-        <textarea
-          ref={textareaRef}
-          value={text}
-          rows={2}
-          placeholder={
-            props.isStreaming
-              ? 'Add a message — it joins the current turn'
-              : 'Message Light Code…  @ to attach a file'
-          }
-          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-            setText(event.target.value)
-            syncMentionQuery(event.target.value, event.target.selectionStart)
-            resize(event.target)
-          }}
-          onClick={(event) => syncMentionQuery(text, event.currentTarget.selectionStart)}
-          onBlur={() => setMentionQuery(undefined)}
-          onPaste={handlePaste}
-          onKeyDown={(event) => {
-            if (showingMentions) {
-              if (event.key === 'ArrowDown') {
-                event.preventDefault()
-                setHighlighted((current) => (current + 1) % props.mentionCandidates.length)
-                return
-              }
-              if (event.key === 'ArrowUp') {
-                event.preventDefault()
-                setHighlighted(
-                  (current) =>
-                    (current - 1 + props.mentionCandidates.length) % props.mentionCandidates.length,
-                )
-                return
-              }
-              if (event.key === 'Enter' || event.key === 'Tab') {
-                const candidate = props.mentionCandidates[highlighted]
-                if (candidate !== undefined) {
+        {/* The grey suggestion is drawn in a layer behind the input, after a transparent copy of the text. The input's
+            own text stays real and visible, so a layer slightly out of step costs only where the grey sits, never the
+            caret or what was typed (the trap a highlight layer once fell into). */}
+        <div style={{ flex: 1, position: 'relative', display: 'flex', minWidth: 0 }}>
+          {ghost.length > 0 && (
+            <div
+              ref={ghostLayerRef}
+              aria-hidden
+              data-testid="composer-suggestion"
+              style={{
+                ...composerTextLayout,
+                position: 'absolute',
+                inset: 0,
+                overflow: 'hidden',
+                whiteSpace: 'pre-wrap',
+                overflowWrap: 'break-word',
+                pointerEvents: 'none',
+                color: 'transparent',
+              }}
+            >
+              {text}
+              <span style={{ color: colors.muted }}>{ghost}</span>
+            </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={text}
+            rows={2}
+            placeholder={
+              props.isStreaming
+                ? 'Add a message — it joins the current turn'
+                : 'Message Light Code…  @ to attach a file'
+            }
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+              setText(event.target.value)
+              syncMentionQuery(event.target.value, event.target.selectionStart)
+              syncCaret(event.target)
+              resize(event.target)
+            }}
+            onSelect={(event) => syncCaret(event.currentTarget)}
+            onScroll={(event) => {
+              if (ghostLayerRef.current !== null) ghostLayerRef.current.scrollTop = event.currentTarget.scrollTop
+            }}
+            onClick={(event) => syncMentionQuery(text, event.currentTarget.selectionStart)}
+            onBlur={() => setMentionQuery(undefined)}
+            onPaste={handlePaste}
+            onKeyDown={(event) => {
+              if (showingMentions) {
+                if (event.key === 'ArrowDown') {
                   event.preventDefault()
-                  insertMention(candidate)
+                  setHighlighted((current) => (current + 1) % props.mentionCandidates.length)
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setHighlighted(
+                    (current) =>
+                      (current - 1 + props.mentionCandidates.length) % props.mentionCandidates.length,
+                  )
+                  return
+                }
+                if (event.key === 'Enter' || event.key === 'Tab') {
+                  const candidate = props.mentionCandidates[highlighted]
+                  if (candidate !== undefined) {
+                    event.preventDefault()
+                    insertMention(candidate)
+                    return
+                  }
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setMentionQuery(undefined)
                   return
                 }
               }
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                setMentionQuery(undefined)
-                return
+              if (ghost.length > 0) {
+                const plain = !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
+                if (event.key === 'Tab' && plain) {
+                  event.preventDefault()
+                  acceptSuggestion(nextWord(ghost))
+                  return
+                }
+                if ((event.key === ' ' && event.ctrlKey) || (event.key === 'ArrowRight' && plain)) {
+                  event.preventDefault()
+                  acceptSuggestion(ghost)
+                  return
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setSuggestion(undefined)
+                  return
+                }
               }
-            }
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              submit()
-            }
-          }}
-          style={{
-            ...composerTextLayout,
-            flex: 1,
-            resize: 'none',
-            border: 'none',
-            outline: 'none',
-            // Grows with the text up to a limit, instead of a fixed two rows that is too
-            // small for a paragraph and too tall for one line.
-            minHeight: 44,
-            maxHeight: 200,
-            overflowY: 'auto',
-            // Drawn by the layer beneath; only the caret and the selection stay visible here.
-            color: colors.inputForeground,
-            background: 'transparent',
-          }}
-        />
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                submit()
+              }
+            }}
+            style={{
+              ...composerTextLayout,
+              position: 'relative',
+              width: '100%',
+              boxSizing: 'border-box',
+              resize: 'none',
+              border: 'none',
+              outline: 'none',
+              // Grows with the text up to a limit, instead of a fixed two rows that is too
+              // small for a paragraph and too tall for one line.
+              minHeight: 44,
+              maxHeight: 200,
+              overflowY: 'auto',
+              // Transparent, so the grey suggestion in the layer beneath shows through after the text.
+              color: colors.inputForeground,
+              background: 'transparent',
+            }}
+          />
+        </div>
 
         {/* Always offered. Hiding it for an unrecognised model made attachment look
             unsupported when it was only unknown. */}

@@ -13,7 +13,10 @@ import type {
 } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { colors, fontFamily } from '../theme.js'
-import { ApprovalsTab } from './ApprovalsTab.js'
+import { ApprovalsTab, Toggle } from './ApprovalsTab.js'
+import { Panel } from './Panel.js'
+import { DecisionModelSection } from './DecisionModelSection.js'
+import { WebChatSection } from './WebChatSection.js'
 import { McpTab } from './McpTab.js'
 import { AgentsTab, type AgentsTabProps } from './AgentsTab.js'
 import { ExpertTab, type ExpertState } from './ExpertTab.js'
@@ -67,6 +70,11 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onRevokeCommand: (command: string) => void
   maxIterations: number
   onSetMaxIterations: (value: number) => void
+  unlimitedSteps?: boolean | undefined
+  /** Grey suggestions while typing in the chat box. Absent hides the switch. */
+  composerCompletion?: boolean | undefined
+  onSetComposerCompletion?: ((value: boolean) => void) | undefined
+  onSetUnlimitedSteps?: ((value: boolean) => void) | undefined
   stallSeconds?: number
   retries?: number
   onSetConnectionRetry?: (stallSeconds: number, retries: number) => void
@@ -397,6 +405,16 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <VariablesTab {...props.variables} />
         ) : shown === 'appearance' ? (
           <div style={{ padding: 12 }}>
+            {props.onSetComposerCompletion !== undefined && (
+              <Panel id="appearance.typing" title="Suggestions while typing" summary={props.composerCompletion === true ? 'On' : 'Off'} defaultOpen>
+                <Toggle
+                  checked={props.composerCompletion === true}
+                  label="Suggest how my message goes on"
+                  description="The chat's model suggests the rest of what you are typing, in grey. Tab takes the next word; Ctrl+Space, or Right arrow at the end, takes all of it; Esc hides it. Each pause in typing is a request to the model, sent to the same gateway as your chat."
+                  onChange={(enabled) => props.onSetComposerCompletion?.(enabled)}
+                />
+              </Panel>
+            )}
             <AppearanceSection
               accentColor={props.accentColor}
               onChangeAccent={props.onSetAccentColor}
@@ -456,6 +474,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onRevokeCommand={props.onRevokeCommand}
             maxIterations={props.maxIterations}
             onSetMaxIterations={props.onSetMaxIterations}
+            unlimitedSteps={props.unlimitedSteps}
+            onSetUnlimitedSteps={props.onSetUnlimitedSteps}
             {...(props.stallSeconds !== undefined ? { stallSeconds: props.stallSeconds } : {})}
             {...(props.retries !== undefined ? { retries: props.retries } : {})}
             {...(props.onSetConnectionRetry !== undefined ? { onSetConnectionRetry: props.onSetConnectionRetry } : {})}
@@ -495,6 +515,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         ) : shown === 'network' ? (
           <NetworkTab {...props.network} onBrowse={props.onBrowse} pickedPath={props.pickedPath} />
         ) : shown === 'agents' ? (
+          <>
           <AgentsTab
             {...props.agents}
             /*
@@ -537,6 +558,9 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               />
             }
           />
+          {transport !== undefined && <DecisionModelSection transport={transport} />}
+          {transport !== undefined && <WebChatSection transport={transport} />}
+          </>
         ) : (
           <McpTab
             servers={props.mcpServers.filter((server) => (props.mcpConfigs[server.name] as { addon?: unknown } | undefined)?.addon === undefined)}

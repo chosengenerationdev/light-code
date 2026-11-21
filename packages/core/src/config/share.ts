@@ -185,7 +185,7 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
     id: 'agents',
     label: 'Agents and expert',
     description: 'Specialist roles and their prompts, and which model holds each seat.',
-    keys: ['agents', 'expert'],
+    keys: ['agents', 'expert', 'decisionModel'],
   },
   {
     id: 'skills',
@@ -304,7 +304,7 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
     id: 'workspace',
     label: 'Workspace behaviour',
     description: 'Mode, step cap, automatic compaction, retries, folders tools may read, and folders hidden from the @ picker.',
-    keys: ['modeId', 'maxIterations', 'autoCompact', 'connection', 'filesystem'],
+    keys: ['modeId', 'maxIterations', 'autoCompact', 'autoHandoff', 'unlimitedSteps', 'composerCompletion', 'connection', 'filesystem'],
     machineSpecific: true,
   },
   {

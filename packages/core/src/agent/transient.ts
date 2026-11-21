@@ -6,6 +6,11 @@
  * ended the turn, and the user's only move was to type "continue" and hope - for a failure that a
  * second attempt a few seconds later almost always gets past.
  *
+ * ENOTFOUND is retried too: on a slow office network a name lookup that times out is reported as
+ * not found, and the reply then failed at once while other clients tried again (reported). A wrong
+ * address costs a few retries, each shown with its reason. The transport code reaches this text
+ * because `describeTlsError` keeps it in brackets.
+ *
  * Deliberately narrow in what it calls transient. Retrying a 401 is a lockout risk, a 400 or a
  * too-long conversation fails identically every time, and a certificate the machine does not
  * trust is a configuration fault - each retry of those only delays the message that says what to
@@ -18,14 +23,18 @@ const TRANSIENT_STATUS = /HTTP (408|409|425|429|500|502|503|504|520|521|522|523|
 
 /** Transport failures: the connection itself went away or never came up in time. */
 const TRANSIENT_TRANSPORT =
-  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|ECONNABORTED|EPIPE|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|socket hang up|other side closed|terminated|fetch failed|network error|UND_ERR_(SOCKET|CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|CLOSED)|No reply from .* within/i
+  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|ECONNABORTED|EPIPE|EAI_AGAIN|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|socket hang up|other side closed|terminated|fetch failed|network error|Connect Timeout|UND_ERR_(SOCKET|CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|CLOSED)|No reply from .* within/i
 
 /** Provider-reported overload, from inside an otherwise healthy stream. */
 const TRANSIENT_PROVIDER = /overloaded|rate.?limit|too many requests|temporarily unavailable|service unavailable|RESOURCE_EXHAUSTED|UNAVAILABLE|try again later|server_error|internal server error/i
 
-/** Never retried, whatever else the message says - each would fail the same way again. */
+/**
+ * Never retried, whatever else the message says - each would fail the same way again. 402 and
+ * billing wording are here because Gemini reports spent prepaid credit as HTTP 402 with status
+ * RESOURCE_EXHAUSTED, which `TRANSIENT_PROVIDER` would otherwise retry for no reason.
+ */
 const PERMANENT =
-  /HTTP (400|401|403|404|405|413|422)\b|certificate|self[- ]signed|unable to verify|CERT_|key (does not|doesn't) match|passphrase|credential missing|context.{0,20}(length|window|limit)|too many tokens|prompt is too long/i
+  /HTTP (400|401|402|403|404|405|413|422)\b|credits? (are |is )?depleted|insufficient (credit|balance|funds)|billing|server certificate|certificate (could not|has expired|is not valid)|TLS handshake failed|self[- ]signed|unable to verify|CERT_|key (does not|doesn't) match|passphrase|credential missing|context.{0,20}(length|window|limit)|too many tokens|prompt is too long/i
 
 export function isTransientError(message: string): boolean {
   if (PERMANENT.test(message)) return false

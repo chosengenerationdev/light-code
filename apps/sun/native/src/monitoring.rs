@@ -90,6 +90,8 @@ enum Pending {
     PastGrid { name: String, at: i64, by: Option<String>, started: Instant },
     /// A check run offline, offered to the team: claim its window, and write it only if nobody else had it.
     Backfill { name: String, slot: i64, doc: Value, started: Instant },
+    /// The decision model's triage of an alert, asked before it is announced; no answer in time means as set.
+    Triage { name: String, level: Level, mode: Mode, telling: monitor::Telling, started: Instant },
 }
 
 impl Pending {
@@ -97,6 +99,7 @@ impl Pending {
         let (started, limit) = match self {
             Pending::Check { started, timeout, .. } => (started, *timeout + 5),
             Pending::Explain { started, .. } => (started, 180),
+            Pending::Triage { started, .. } => (started, 20),
             Pending::Details { started, .. } | Pending::History { started, .. } | Pending::ExplainHistory { started, .. } | Pending::Revisions { started, .. } => (started, 120),
             Pending::Claim { started, .. } | Pending::Write { started } | Pending::Latest { started } => (started, 60),
             Pending::Prune { started } => (started, 300),
@@ -770,6 +773,7 @@ impl App {
             env: environment.vars,
             path: environment.path,
             no_schedules: true,
+            resume_interrupted: false,
             siblings: Vec::new(),
             sibling_hubs: Vec::new(),
             change_ledger: root.join("changes.jsonl"),
@@ -1054,6 +1058,12 @@ impl App {
                     None => json!({ "type": "pastGrid", "ok": false, "at": at, "error": past_grid_missing(by.as_deref()) }),
                 };
                 self.monitoring.grid_out.push((name, message));
+            }
+            Pending::Triage { name, level, mode, telling, .. } => {
+                let needs = result.ok().and_then(|answer| answer.get("needsHuman").and_then(Value::as_f64));
+                let triaged = monitor::triaged_mode(mode, level, needs);
+                let note = needs.map(|p| format!("Decision model: {} ({:.2})", if p >= 0.5 { "needs you now" } else { "can wait" }, p));
+                self.announce(&name, level, triaged, telling, note);
             }
             Pending::Probe { name, .. } => {
                 let ready = match result {
@@ -1490,6 +1500,40 @@ impl App {
         if mode <= Mode::Dashboard {
             return;
         }
+        // Getting worse, with the executor already running: asked whether it needs a person now first (the host answers
+        // null without a decision model, and nothing starts the executor for this).
+        if telling == monitor::Telling::Worse && self.monitoring.executor.as_ref().map(|e| e.ready).unwrap_or(false) {
+            // The alerts themselves, not only the headline: the first ten, each with its message and its row - read from
+            // the saved check only now, since rows are never held in memory.
+            let alerts: Vec<Value> = self
+                .monitoring
+                .store
+                .result(&f.name)
+                .and_then(|record| record.evaluation)
+                .map(|e| {
+                    e.alerts
+                        .iter()
+                        .take(10)
+                        .map(|a| json!({ "level": a.level.meaning(), "key": a.key, "message": a.message, "row": e.rows.get(a.row).cloned().unwrap_or_default() }))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let context = json!({ "monitor": f.title(), "level": level.meaning(), "headline": summary.headline, "team": f.team, "alerts": alerts });
+            let pending = Pending::Triage { name: f.name.clone(), level, mode, telling, started: Instant::now() };
+            if self.exec_request(json!({ "kind": "triage", "context": context }), pending).is_ok() {
+                return;
+            }
+        }
+        self.announce(&f.name, level, mode, telling, None);
+    }
+
+    /// The Windows notification for an alert, in the mode decided (`maybe_notify`, after triage when there was one).
+    fn announce(&mut self, name: &str, level: Level, mode: Mode, telling: monitor::Telling, note: Option<String>) {
+        if mode <= Mode::Dashboard {
+            return;
+        }
+        let Some(f) = self.monitoring.found.iter().find(|f| f.name == name).cloned() else { return };
+        let Some(summary) = self.monitoring.summaries.get(name).cloned() else { return };
         let style = match mode {
             Mode::Silent => system::ToastStyle::Silent,
             Mode::Toast => system::ToastStyle::Normal,
@@ -1501,11 +1545,13 @@ impl App {
             monitor::Telling::StillBad => format!("{} - still {}", f.title(), level.meaning().to_lowercase()),
             monitor::Telling::Worse => format!("{} - {}", f.title(), level.meaning()),
         };
+        let local = monitor::local_now();
         let detail = format!(
-            "{} monitor · checked {}{}",
+            "{} monitor · checked {}{}{}",
             if f.team { "Team" } else { "Personal" },
             local_clock(summary.at, local.offset_secs),
-            summary.by.as_deref().map(|b| format!(" by {b}")).unwrap_or_default()
+            summary.by.as_deref().map(|b| format!(" by {b}")).unwrap_or_default(),
+            note.map(|n| format!(" · {n}")).unwrap_or_default()
         );
         let buttons: Vec<(&str, &str)> = if telling == monitor::Telling::Recovered { vec![("Open", "open")] } else { vec![("Open", "open"), ("Acknowledge", "ack"), ("Snooze 1 hour", "snooze60")] };
         let (proxy, name) = (self.proxy.clone(), f.name.clone());
@@ -1571,6 +1617,10 @@ impl App {
                 }
                 _ => {}
             }
+            return;
+        }
+        // Agents asking each other share this line (`agents.rs`); everything else here is monitoring.
+        if self.agent_line(from, generation, &payload, webview) {
             return;
         }
         if kind != "request" {

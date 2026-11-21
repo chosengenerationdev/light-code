@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactElement } from 'react'
 
-import { DEFAULT_LOOP_ROUNDS, strategyOrder, type HostToUiMessage, type StrategiesMessage, type Strategy, type StrategyEdge, type StrategyExchange, type StrategyGroup, type StrategyNode, type Transport, type UiToHostMessage } from '@light-code/core/browser'
+import { DEFAULT_LOOP_ROUNDS, groupKind, groupName, strategyOrder, type HostToUiMessage, type StrategiesMessage, type Strategy, type StrategyEdge, type StrategyExchange, type StrategyGroup, type StrategyNode, type Transport, type UiToHostMessage } from '@light-code/core/browser'
 
+import { MentionTextarea } from './MentionTextarea.js'
 import { Select } from './Select.js'
 import { disabledWhen } from './disabledWhen.js'
 import { colors, fontFamily, labelStyle, monospaceFamily, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from './theme.js'
@@ -28,20 +29,41 @@ function blankStrategy(): Strategy {
   return { id: newId('s'), name: 'New strategy', nodes: [], edges: [], updatedAt: 0 }
 }
 
-/** Where the line from a node's centre towards `toward` leaves its box. */
-function boxExit(node: StrategyNode, toward: { x: number; y: number }): { x: number; y: number } {
-  const cx = node.x + NODE_W / 2
-  const cy = node.y + NODE_H / 2
+/** What a connector can join: a step, or a box (drawn by its outline). */
+interface Area {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+function areaOf(s: Strategy, id: string): Area | undefined {
+  const node = s.nodes.find((n) => n.id === id)
+  if (node !== undefined) return { x: node.x, y: node.y, w: NODE_W, h: NODE_H }
+  const group = s.groups?.find((g) => g.id === id)
+  return group === undefined ? undefined : { x: group.x, y: group.y, w: group.w, h: group.h }
+}
+
+/** Where the line from an area's centre towards `toward` leaves it. */
+function boxExit(area: Area | StrategyNode, toward: { x: number; y: number }): { x: number; y: number } {
+  const w = 'w' in area ? area.w : NODE_W
+  const h = 'h' in area ? area.h : NODE_H
+  const cx = area.x + w / 2
+  const cy = area.y + h / 2
   const dx = toward.x - cx
   const dy = toward.y - cy
   if (dx === 0 && dy === 0) return { x: cx, y: cy }
-  const scale = Math.min(Math.abs(NODE_W / 2 / (dx || 1e-9)), Math.abs(NODE_H / 2 / (dy || 1e-9)))
+  const scale = Math.min(Math.abs(w / 2 / (dx || 1e-9)), Math.abs(h / 2 / (dy || 1e-9)))
   return { x: cx + dx * scale, y: cy + dy * scale }
 }
 
-function centre(node: StrategyNode): { x: number; y: number } {
-  return { x: node.x + NODE_W / 2, y: node.y + NODE_H / 2 }
+function centre(area: Area | StrategyNode): { x: number; y: number } {
+  const w = 'w' in area ? area.w : NODE_W
+  const h = 'h' in area ? area.h : NODE_H
+  return { x: area.x + w / 2, y: area.y + h / 2 }
 }
+
+const isGroupId = (s: Strategy, id: string): boolean => (s.groups ?? []).some((g) => g.id === id)
 
 type Selection = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | { kind: 'group'; id: string } | undefined
 
@@ -127,6 +149,19 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
   }, [transport])
 
   const roleName = useCallback((role: string) => message?.roles.find((r) => r.id === role)?.name ?? role, [message])
+  /** A connector end by name: the step's role, or the box's name. */
+  const endName = (id: string): string => {
+    const node = draft.nodes.find((n) => n.id === id)
+    if (node !== undefined) return roleName(node.role)
+    const group = draft.groups?.find((g) => g.id === id)
+    return group === undefined ? '' : `${groupKind(group) === 'parallel' ? '∥' : '▭'} ${groupName(group)}`
+  }
+  /** The roles a connector end stands for: one step's, or every step's inside a box. */
+  const endRoles = (id: string): string[] => {
+    const node = draft.nodes.find((n) => n.id === id)
+    if (node !== undefined) return [node.role]
+    return draft.nodes.filter((n) => n.group === id).map((n) => n.role)
+  }
 
   const update = (change: (s: Strategy) => Strategy): void => setDraft((s) => change(s))
   const updateNode = (id: string, change: Partial<StrategyNode>): void =>
@@ -136,11 +171,11 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
 
   const updateGroup = (id: string, change: Partial<StrategyGroup>): void =>
     update((s) => ({ ...s, groups: (s.groups ?? []).map((g) => (g.id === id ? { ...g, ...change } : g)) }))
-  const addGroup = (): void => {
+  const addGroup = (kind: 'parallel' | 'together'): void => {
     const id = newId('g')
     update((s) => {
       const index = (s.groups ?? []).length
-      const group: StrategyGroup = { id, label: 'In parallel', x: 30 + index * 40, y: 200 + index * 40, w: NODE_W * 2 + 60, h: NODE_H + 70 }
+      const group: StrategyGroup = { id, label: kind === 'parallel' ? 'In parallel' : 'Group', kind, x: 30 + index * 40, y: 200 + index * 40, w: NODE_W * 2 + 60, h: NODE_H + 70 }
       return withMembership({ ...s, groups: [...(s.groups ?? []), group] })
     })
     setSelection({ kind: 'group', id })
@@ -162,8 +197,10 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
     if (selection.kind === 'node') {
       update((s) => ({ ...s, nodes: s.nodes.filter((n) => n.id !== selection.id), edges: s.edges.filter((e) => e.from !== selection.id && e.to !== selection.id) }))
     } else if (selection.kind === 'group') {
-      // The box goes; the steps in it stay where they are, no longer parallel.
-      update((s) => withMembership({ ...s, groups: (s.groups ?? []).filter((g) => g.id !== selection.id) }))
+      // The box goes with its connectors; the steps in it stay where they are, no longer in a box.
+      update((s) =>
+        withMembership({ ...s, groups: (s.groups ?? []).filter((g) => g.id !== selection.id), edges: s.edges.filter((e) => e.from !== selection.id && e.to !== selection.id) }),
+      )
     } else {
       update((s) => ({ ...s, edges: s.edges.filter((e) => e.id !== selection.id) }))
     }
@@ -200,14 +237,21 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
     setDrag({ kind: 'move', id: node.id, dx: at.x - node.x, dy: at.y - node.y, moved: false })
     setSelection({ kind: 'node', id: node.id })
   }
-  const onHandleDown = (event: ReactPointerEvent, node: StrategyNode): void => {
+  /** The dot on a step's or a box's right edge: drag from it onto a step or a box to connect them. */
+  const onHandleDown = (event: ReactPointerEvent, id: string): void => {
     event.stopPropagation()
     svg.current?.setPointerCapture?.(event.pointerId)
     const at = toCanvas(event)
-    setDrag({ kind: 'connect', from: node.id, x: at.x, y: at.y })
+    setDrag({ kind: 'connect', from: id, x: at.x, y: at.y })
   }
   const onGroupDown = (event: ReactPointerEvent, group: StrategyGroup, resize: boolean): void => {
     event.stopPropagation()
+    // Picking the other end of "Connect to…": a box is a valid end.
+    if (connectFrom !== undefined && !resize) {
+      connect(connectFrom, group.id)
+      setConnectFrom(undefined)
+      return
+    }
     svg.current?.setPointerCapture?.(event.pointerId)
     const at = toCanvas(event)
     setSelection({ kind: 'group', id: group.id })
@@ -242,12 +286,21 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
       setDrag({ ...drag, x: at.x, y: at.y })
     }
   }
-  /** Joins two steps; drawn again the other way, the connector becomes a back-and-forth. */
+  /**
+   * Joins two steps, a step and a box, or two boxes; drawn again the other way between two steps, the connector
+   * becomes a back-and-forth (a box is one step of the flow and never half of a back-and-forth).
+   */
   const connect = (from: string, to: string): void => {
     if (from === to) return
+    // A box and a step inside it: the steps inside are connected to each other, not to their own box.
+    const inside = (box: string, step: string): boolean => draft.nodes.some((n) => n.id === step && n.group === box)
+    if (inside(from, to) || inside(to, from)) {
+      setResult({ ok: false, message: 'A box cannot be connected to a step inside it - connect the steps inside to each other instead.' })
+      return
+    }
     const existing = draft.edges.find((e) => (e.from === from && e.to === to) || (e.from === to && e.to === from))
     if (existing !== undefined) {
-      if (existing.from === to) updateEdge(existing.id, { twoWay: true })
+      if (existing.from === to && !isGroupId(draft, from) && !isGroupId(draft, to)) updateEdge(existing.id, { twoWay: true })
       setSelection({ kind: 'edge', id: existing.id })
       return
     }
@@ -259,8 +312,13 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
   const onUp = (event: ReactPointerEvent): void => {
     if (drag?.kind === 'connect') {
       const at = toCanvas(event)
-      const target = draft.nodes.find((n) => at.x >= n.x && at.x <= n.x + NODE_W && at.y >= n.y && at.y <= n.y + NODE_H)
-      if (target !== undefined) connect(drag.from, target.id)
+      // A step under the pointer first; otherwise the box it was dropped on (the smallest, if boxes overlap).
+      const step = draft.nodes.find((n) => at.x >= n.x && at.x <= n.x + NODE_W && at.y >= n.y && at.y <= n.y + NODE_H)
+      const box = (draft.groups ?? [])
+        .filter((g) => at.x >= g.x && at.x <= g.x + g.w && at.y >= g.y && at.y <= g.y + g.h)
+        .sort((a, b) => a.w * a.h - b.w * b.h)[0]
+      const target = step?.id ?? box?.id
+      if (target !== undefined) connect(drag.from, target)
     }
     // A step dropped into a box, or a box moved or resized over steps: membership follows where they are.
     if (drag !== undefined && drag.kind !== 'connect') update(withMembership)
@@ -307,11 +365,20 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
   const exchanges: StrategyExchange[] = useMemo(() => {
     if (!isActive) return []
     const all = [...(message?.exchanges ?? [])].reverse()
-    const roleOf = (id: string): string | undefined => draft.nodes.find((n) => n.id === id)?.role
+    const rolesOf = (id: string): string[] => {
+      const node = draft.nodes.find((n) => n.id === id)
+      return node !== undefined ? [node.role] : draft.nodes.filter((n) => n.group === id).map((n) => n.role)
+    }
     const roles =
-      selectedNode !== undefined ? new Set([selectedNode.role]) : selectedEdge !== undefined ? new Set([roleOf(selectedEdge.from), roleOf(selectedEdge.to)].filter((r): r is string => r !== undefined)) : undefined
+      selectedNode !== undefined
+        ? new Set([selectedNode.role])
+        : selectedEdge !== undefined
+          ? new Set([...rolesOf(selectedEdge.from), ...rolesOf(selectedEdge.to)])
+          : selectedGroup !== undefined
+            ? new Set(rolesOf(selectedGroup.id))
+            : undefined
     return roles === undefined ? all : all.filter((e) => roles.has(e.role))
-  }, [isActive, message, draft, selectedNode, selectedEdge])
+  }, [isActive, message, draft, selectedNode, selectedEdge, selectedGroup])
 
   // In its own tab it fills the tab; over the chat panel it leaves a margin and a backdrop to click away on.
   const overlay: CSSProperties = props.standalone === true
@@ -395,12 +462,16 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                 <span style={{ display: 'block', fontSize: 10, color: colors.muted }}>{role.assigned ? (role.label ?? '') : 'not assigned'}</span>
               </button>
             ))}
-            <button type="button" onClick={addGroup} title="A box whose steps are consulted at the same time, each in its own process" style={{ ...secondaryButtonStyle(), display: 'block', width: '100%', textAlign: 'left', marginTop: 8 }}>
+            <button type="button" onClick={() => addGroup('parallel')} title="A box whose steps are consulted at the same time, each in its own process" style={{ ...secondaryButtonStyle(), display: 'block', width: '100%', textAlign: 'left', marginTop: 8 }}>
               ∥ Add a parallel box
               <span style={{ display: 'block', fontSize: 10, color: colors.muted }}>steps dropped in run at once</span>
             </button>
+            <button type="button" onClick={() => addGroup('together')} title="A box of steps done as a group, in their own order; the flow goes on once all of them are done" style={{ ...secondaryButtonStyle(), display: 'block', width: '100%', textAlign: 'left', marginTop: 4 }}>
+              ▭ Add a box
+              <span style={{ display: 'block', fontSize: 10, color: colors.muted }}>a group of steps; flows on when all are done</span>
+            </button>
             <div style={{ fontSize: 11, color: colors.muted, marginTop: 10, lineHeight: 1.5 }}>
-              Drag a step to move it. To connect two steps, select one and press Connect to… on the right, then click the other - or drag from its coloured dot onto the other. Connect them back the other way for a back-and-forth. Delete removes the selected item.
+              Drag a step to move it. To connect two steps, select one and press Connect to… on the right, then click the other - or drag from its coloured dot onto the other. A box connects the same way, from its own dot or button: what leads out of a box follows once every step inside has answered. Connect two steps back the other way for a back-and-forth. Delete removes the selected item.
             </div>
           </div>
 
@@ -427,8 +498,9 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                 </marker>
               </defs>
               {(draft.groups ?? []).map((group) => {
-                const chosen = selection?.kind === 'group' && selection.id === group.id
+                const chosen = (selection?.kind === 'group' && selection.id === group.id) || connectFrom === group.id
                 const members = draft.nodes.filter((n) => n.group === group.id).length
+                const parallel = groupKind(group) === 'parallel'
                 return (
                   <g key={group.id}>
                     <rect
@@ -438,19 +510,33 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                       height={group.h}
                       rx={12}
                       fill={colors.accentSoft}
-                      fillOpacity={0.35}
+                      fillOpacity={parallel ? 0.35 : 0.18}
                       stroke={chosen ? colors.accent : colors.border}
                       strokeWidth={chosen ? 2 : 1.2}
-                      strokeDasharray="8 5"
-                      style={{ cursor: 'move' }}
+                      strokeDasharray={parallel ? '8 5' : undefined}
+                      style={{ cursor: connectFrom !== undefined ? (connectFrom === group.id ? 'not-allowed' : 'crosshair') : 'move' }}
                       onPointerDown={(event) => onGroupDown(event, group, false)}
                     />
                     <text x={group.x + 10} y={group.y + 16} fontSize={11} fontWeight={600} fill={colors.muted} pointerEvents="none">
-                      ∥ {group.label ?? 'In parallel'} · {members} step{members === 1 ? '' : 's'} at once
+                      {parallel ? '∥' : '▭'} {groupName(group)} · {members} step{members === 1 ? '' : 's'}
+                      {parallel ? ' at once' : ', then on when all are done'}
                     </text>
                     <rect x={group.x + group.w - 12} y={group.y + group.h - 12} width={12} height={12} fill={chosen ? colors.accent : colors.border} style={{ cursor: 'nwse-resize' }} onPointerDown={(event) => onGroupDown(event, group, true)}>
                       <title>Drag to resize</title>
                     </rect>
+                    {/* The box's own connect handle: what leads out of it follows once every step inside has answered. */}
+                    <circle
+                      cx={group.x + group.w}
+                      cy={group.y + group.h / 2}
+                      r={8}
+                      fill={colors.background}
+                      stroke={colors.accent}
+                      strokeWidth={2.5}
+                      style={{ cursor: 'crosshair' }}
+                      onPointerDown={(event) => onHandleDown(event, group.id)}
+                    >
+                      <title>Drag to a step or another box to connect this box - followed once every step inside has answered</title>
+                    </circle>
                   </g>
                 )
               })}
@@ -468,12 +554,12 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
               ) : null}
               {connectFrom !== undefined ? (
                 <text x={12} y={CANVAS_H > 0 ? 20 : 20} fill={colors.accent} fontSize={13} fontWeight={600} pointerEvents="none">
-                  Now click the step it should lead to (Esc to cancel)
+                  Now click the step or box it should lead to (Esc to cancel)
                 </text>
               ) : null}
               {draft.edges.map((edge) => {
-                const from = draft.nodes.find((n) => n.id === edge.from)
-                const to = draft.nodes.find((n) => n.id === edge.to)
+                const from = areaOf(draft, edge.from)
+                const to = areaOf(draft, edge.to)
                 if (from === undefined || to === undefined) return null
                 const a = boxExit(from, centre(to))
                 const b = boxExit(to, centre(from))
@@ -522,7 +608,7 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
               })}
               {drag?.kind === 'connect'
                 ? (() => {
-                    const from = draft.nodes.find((n) => n.id === drag.from)
+                    const from = areaOf(draft, drag.from)
                     if (from === undefined) return null
                     const a = boxExit(from, { x: drag.x, y: drag.y })
                     return <line x1={a.x} y1={a.y} x2={drag.x} y2={drag.y} stroke={colors.accent} strokeWidth={2} strokeDasharray="4 3" markerEnd="url(#lc-arrow-accent)" pointerEvents="none" />
@@ -584,9 +670,9 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                       stroke={colors.background}
                       strokeWidth={2}
                       style={{ cursor: 'crosshair' }}
-                      onPointerDown={(event) => onHandleDown(event, node)}
+                      onPointerDown={(event) => onHandleDown(event, node.id)}
                     >
-                      <title>Drag to another step to connect</title>
+                      <title>Drag to another step or a box to connect</title>
                     </circle>
                   </g>
                 )
@@ -644,30 +730,60 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                     <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>It cannot change anything: it is given no tool that edits or runs commands, and recommends instead.</span>
                   </span>
                 </label>
+                {/* Only where a decision model is set up (Settings → Agents), or on a step that already is one. */}
+                {(message?.decisionModel === true || selectedNode.decides === true) && (
+                  <>
+                    <label style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'flex-start', fontSize: 12 }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedNode.decides === true}
+                        onChange={(event) => updateNode(selectedNode.id, event.target.checked ? { decides: true } : { decides: undefined, decisionQuestion: undefined })}
+                      />
+                      <span>
+                        The decision model picks the next step
+                        <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+                          A decision step: once it answers, the decision model chooses which of its connectors to follow, by where they lead and their labels.
+                          Needs two or more connectors out of it ({String(draft.edges.filter((edge) => edge.from === selectedNode.id && edge.twoWay !== true).length)} now). Not sure, or no decision model: the main agent chooses.
+                        </span>
+                      </span>
+                    </label>
+                    {selectedNode.decides === true && (
+                      <input
+                        aria-label="Question for the decision model"
+                        value={selectedNode.decisionQuestion ?? ''}
+                        maxLength={500}
+                        placeholder="The question it is asked, e.g. Did the review find a security problem?"
+                        onChange={(event) => updateNode(selectedNode.id, event.target.value.length > 0 ? { decisionQuestion: event.target.value } : { decisionQuestion: undefined })}
+                        style={{ ...textFieldStyle(), marginTop: 6, width: '100%', boxSizing: 'border-box' }}
+                      />
+                    )}
+                  </>
+                )}
                 <label style={{ ...labelStyle(), marginTop: 10 }} htmlFor="strategy-node-instructions">
                   Instructions for this specialist
                 </label>
-                <textarea
+                <MentionTextarea
+                  key={selectedNode.id}
                   id="strategy-node-instructions"
-                  ref={instructionsBox}
+                  transport={transport}
+                  inputRef={instructionsBox}
                   value={selectedNode.instructions ?? ''}
                   maxLength={4000}
-                  rows={6}
-                  placeholder="e.g. write a failing test for the change first; never edit the code under test"
-                  onChange={(event) => updateNode(selectedNode.id, event.target.value.length > 0 ? { instructions: event.target.value } : { instructions: undefined })}
-                  style={{ ...textFieldStyle(), width: '100%', boxSizing: 'border-box' }}
+                  rows={8}
+                  placeholder="What is expected of it in this strategy, e.g. write a failing test first, following @docs/testing.md; never edit the code under test"
+                  onChange={(value) => updateNode(selectedNode.id, value.length > 0 ? { instructions: value } : { instructions: undefined })}
                 />
                 <span style={{ display: 'block', fontSize: 11, color: colors.muted, marginTop: 4 }}>
-                  Sent to it with every question it is asked under this strategy. Leave empty and the main agent decides what to ask it, from its plan.
+                  Sent to it with every question it is asked under this strategy. Type <code style={{ fontFamily: monospaceFamily }}>@</code> to name a file or folder: its contents are attached each time, as in the chat. Leave empty and the main agent decides what to ask it, from its plan.
                 </span>
                 <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
                   <button
                     type="button"
-                    style={primaryButtonStyle(draft.nodes.length < 2)}
-                    {...disabledWhen([draft.nodes.length < 2, 'Add another step first - a connector needs two.'], { enabledTitle: 'Then click the step this one should lead to.' })}
+                    style={primaryButtonStyle(draft.nodes.length < 2 && (draft.groups ?? []).length === 0)}
+                    {...disabledWhen([draft.nodes.length < 2 && (draft.groups ?? []).length === 0, 'Add another step or a box first - a connector needs two ends.'], { enabledTitle: 'Then click the step or box this one should lead to.' })}
                     onClick={() => setConnectFrom(selectedNode.id)}
                   >
-                    {connectFrom === selectedNode.id ? 'Click the other step…' : 'Connect to…'}
+                    {connectFrom === selectedNode.id ? 'Click the other step or box…' : 'Connect to…'}
                   </button>
                   <button type="button" style={secondaryButtonStyle()} onClick={removeSelected}>
                     Remove step
@@ -676,7 +792,7 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
               </>
             ) : selectedGroup !== undefined ? (
               <>
-                <strong>Parallel box</strong>
+                <strong>{groupKind(selectedGroup) === 'parallel' ? 'Parallel box' : 'Box'}</strong>
                 <label style={{ ...labelStyle(), marginTop: 8 }} htmlFor="strategy-group-label">
                   Name
                 </label>
@@ -687,33 +803,64 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                   onChange={(event) => updateGroup(selectedGroup.id, event.target.value.length > 0 ? { label: event.target.value } : { label: undefined })}
                   style={{ ...textFieldStyle(), width: '100%', boxSizing: 'border-box' }}
                 />
+                <label style={{ ...labelStyle(), marginTop: 10 }} htmlFor="strategy-group-kind">
+                  The steps inside
+                </label>
+                <Select
+                  id="strategy-group-kind"
+                  value={groupKind(selectedGroup)}
+                  options={[
+                    { value: 'parallel', label: 'Run at the same time', detail: 'each in its own process' },
+                    { value: 'together', label: 'Run as a group', detail: 'in their own order' },
+                  ]}
+                  onChange={(value) => updateGroup(selectedGroup.id, { kind: value === 'together' ? 'together' : 'parallel' })}
+                />
                 <span style={{ display: 'block', fontSize: 11, color: colors.muted, marginTop: 6 }}>
-                  Steps dropped inside are consulted at the same time, each specialist in its own process, and the strategy carries on when all have answered.
-                  Drag the box to move it with its steps, its corner to resize it. A role belongs in one box once.
+                  {groupKind(selectedGroup) === 'parallel'
+                    ? 'Steps dropped inside are consulted at the same time, each specialist in its own process. A role belongs in a parallel box once.'
+                    : 'Steps dropped inside are done one after another - in the order of the connectors between them, else as drawn.'}{' '}
+                  A connector into the box gives every step inside what arrives; a connector out of it is followed once every step inside has answered. Drag the box to move it with its steps, its corner to resize it.
                 </span>
-                <button type="button" style={{ ...secondaryButtonStyle(), marginTop: 10 }} onClick={removeSelected}>
-                  Remove box
-                </button>
+                <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    style={primaryButtonStyle(draft.nodes.length < 1)}
+                    {...disabledWhen([draft.nodes.length < 1, 'Add a step first - a connector needs somewhere to go.'], { enabledTitle: 'Then click the step or box this box should lead to.' })}
+                    onClick={() => setConnectFrom(selectedGroup.id)}
+                  >
+                    {connectFrom === selectedGroup.id ? 'Click the other step or box…' : 'Connect to…'}
+                  </button>
+                  <button type="button" style={secondaryButtonStyle()} onClick={removeSelected}>
+                    Remove box
+                  </button>
+                </div>
               </>
             ) : selectedEdge !== undefined ? (
               <>
                 <strong>
-                  {roleName(draft.nodes.find((n) => n.id === selectedEdge.from)?.role ?? '')} {selectedEdge.twoWay === true ? '⇄' : '→'}{' '}
-                  {roleName(draft.nodes.find((n) => n.id === selectedEdge.to)?.role ?? '')}
+                  {endName(selectedEdge.from)} {selectedEdge.twoWay === true ? '⇄' : '→'} {endName(selectedEdge.to)}
                 </strong>
-                <label style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'flex-start', fontSize: 12 }}>
-                  <input type="checkbox" checked={selectedEdge.twoWay === true} onChange={(event) => updateEdge(selectedEdge.id, { twoWay: event.target.checked })} />
-                  <span>
-                    Back and forth
-                    <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
-                      {roleName(draft.nodes.find((n) => n.id === selectedEdge.from)?.role ?? '')} works, {roleName(draft.nodes.find((n) => n.id === selectedEdge.to)?.role ?? '')} checks, and back again.
-                    </span>
+                {isGroupId(draft, selectedEdge.from) || isGroupId(draft, selectedEdge.to) ? (
+                  <span style={{ display: 'block', fontSize: 11, color: colors.muted, marginTop: 6 }}>
+                    {isGroupId(draft, selectedEdge.from) ? `Followed once every step in ${endName(selectedEdge.from)} has answered. ` : ''}
+                    {isGroupId(draft, selectedEdge.to) ? `Every step in ${endName(selectedEdge.to)} starts from what arrives here. ` : ''}
+                    A back-and-forth joins two steps, so it is not offered on a box.
                   </span>
-                </label>
+                ) : (
+                  <label style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'flex-start', fontSize: 12 }}>
+                    <input type="checkbox" checked={selectedEdge.twoWay === true} onChange={(event) => updateEdge(selectedEdge.id, { twoWay: event.target.checked })} />
+                    <span>
+                      Back and forth
+                      <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+                        {endName(selectedEdge.from)} works, {endName(selectedEdge.to)} checks, and back again.
+                      </span>
+                    </span>
+                  </label>
+                )}
                 {selectedEdge.twoWay === true ? (
                   <>
                     <label style={{ ...labelStyle(), marginTop: 10 }} htmlFor="strategy-edge-until">
-                      Until (judged by {roleName(draft.nodes.find((n) => n.id === selectedEdge.to)?.role ?? '')})
+                      Until (judged by {endName(selectedEdge.to)})
                     </label>
                     <textarea
                       id="strategy-edge-until"
@@ -789,7 +936,9 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                   style={{ ...textFieldStyle(), width: '100%', boxSizing: 'border-box', fontFamily: monospaceFamily }}
                 />
                 <span style={{ display: 'block', fontSize: 11, color: colors.muted, marginTop: 4 }}>
-                  After each answer Light Code checks every item is there, and asks the same specialist again for any it left out (twice at most) before it goes on.
+                  {isGroupId(draft, selectedEdge.from)
+                    ? 'Out of a box, these are told to every step inside as part of the contract; they are checked only on a connector leaving a single step.'
+                    : 'After each answer Light Code checks every item is there, and asks the same specialist again for any it left out (twice at most) before it goes on.'}
                 </span>
                 <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
                   <button type="button" style={secondaryButtonStyle()} onClick={() => updateEdge(selectedEdge.id, { from: selectedEdge.to, to: selectedEdge.from })} title="Swap which side works and which checks">
@@ -817,7 +966,7 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                           style={{ cursor: 'pointer', padding: '4px 0', borderTop: `1px solid ${colors.border}` }}
                         >
                           <strong>
-                            {roleName(draft.nodes.find((n) => n.id === e.from)?.role ?? '')} {e.twoWay === true ? '⇄' : '→'} {roleName(draft.nodes.find((n) => n.id === e.to)?.role ?? '')}
+                            {endName(e.from)} {e.twoWay === true ? '⇄' : '→'} {endName(e.to)}
                           </strong>
                           {e.contract !== undefined ? <div style={{ whiteSpace: 'pre-wrap' }}>{e.contract}</div> : null}
                           {(e.requires ?? []).length > 0 ? <div style={{ color: colors.muted }}>Checked: {(e.requires ?? []).join(', ')}</div> : null}
@@ -887,10 +1036,12 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                     onClick={() => {
                       const about =
                         selectedEdge !== undefined
-                          ? `the ${roleName(draft.nodes.find((n) => n.id === selectedEdge.from)?.role ?? '')} and ${roleName(draft.nodes.find((n) => n.id === selectedEdge.to)?.role ?? '')} step`
+                          ? `the hand-over from ${endName(selectedEdge.from)} to ${endName(selectedEdge.to)}`
                           : selectedNode !== undefined
                             ? `the ${roleName(selectedNode.role)} step`
-                            : 'the strategy so far'
+                            : selectedGroup !== undefined
+                              ? `the box "${groupName(selectedGroup)}" (${endRoles(selectedGroup.id).map(roleName).join(', ')})`
+                              : 'the strategy so far'
                       props.onAsk?.(`Explain what has happened in ${about}: what was agreed between the specialists, and why it went back and forth. Use strategy_history.`)
                       props.onClose()
                     }}

@@ -81,6 +81,8 @@ describe('which failures are worth sending again', () => {
       'Could not reach https://gw: unable to verify the first certificate',
       "This model's maximum context length is 8192 tokens.",
       'credential missing for profile gateway — reconfigure',
+      // Gemini's spent prepaid credit: a 402 whose body says RESOURCE_EXHAUSTED, which is otherwise retried.
+      'Request to https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse failed with HTTP 402: { "error": { "code": 402, "message": "Your prepayment credits are depleted.", "status": "RESOURCE_EXHAUSTED" } }',
     ]) {
       expect(isTransientError(message), message).toBe(false)
     }
@@ -150,5 +152,41 @@ describe('a request that goes silent', () => {
     const result = await run(provider, { stallSeconds: 5, signal: controller.signal })
     expect(provider.calls).toBe(1)
     expect(result.retries).toEqual([])
+  })
+})
+
+/**
+ * Reported: on a slow office network every request failed at once while another client talked to the
+ * same gateway. The transport failure reached the retry check only as `describeTlsError`'s sentence,
+ * which had dropped every code it looks for - and a reset was described with the word "certificate",
+ * which reads as permanent.
+ */
+describe('a slow or flaky network is retried, through the words the user sees', () => {
+  /** What undici throws: `fetch failed`, with the real reason on `cause`. */
+  const undiciFailure = (code: string, message: string): Error => {
+    const cause = Object.assign(new Error(message), { code })
+    return new TypeError('fetch failed', { cause })
+  }
+
+  it.each([
+    ['ECONNRESET', 'read ECONNRESET'],
+    ['ECONNRESET', 'Client network socket disconnected before secure TLS connection was established'],
+    ['UND_ERR_CONNECT_TIMEOUT', 'Connect Timeout Error (attempted address: gw.example:443, timeout: 10000ms)'],
+    ['ETIMEDOUT', 'connect ETIMEDOUT 10.0.0.1:443'],
+    ['EAI_AGAIN', 'getaddrinfo EAI_AGAIN gw.example'],
+    ['ENOTFOUND', 'getaddrinfo ENOTFOUND gw.example'],
+    ['ECONNREFUSED', 'connect ECONNREFUSED 10.0.0.1:443'],
+    ['UND_ERR_SOCKET', 'other side closed'],
+  ])('%s: %s', async (code, message) => {
+    const { describeTlsError } = await import('../providers/auth/apigeeMtls.js')
+    const shown = `Could not reach https://gw.example/v1/chat/completions: ${describeTlsError(undiciFailure(code, message))}`
+    expect(shown).toContain(code)
+    expect(isTransientError(shown), shown).toBe(true)
+  })
+
+  it('still never retries a certificate the machine does not trust', async () => {
+    const { describeTlsError } = await import('../providers/auth/apigeeMtls.js')
+    const shown = describeTlsError(undiciFailure('UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'unable to verify the first certificate'))
+    expect(isTransientError(`Could not reach https://gw: ${shown}`)).toBe(false)
   })
 })

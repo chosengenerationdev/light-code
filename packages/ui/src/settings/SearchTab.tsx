@@ -109,6 +109,8 @@ const BACKENDS: {
   },
 ]
 
+const KIND_NAMES: Record<VectorStoreKind, string> = { opensearch: 'OpenSearch', qdrant: 'Qdrant', chroma: 'Chroma' }
+
 /**
  * A numeric limit with its default as the placeholder, so "unset" reads as the default.
  *
@@ -716,6 +718,9 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <strong>{connection.label}</strong>
+              {/* The type, always: a connection saved with the form's default type (Qdrant) and an
+                  OpenSearch address looked identical to a correct one here (reported). */}
+              <span style={{ color: colors.muted, fontSize: 11 }}>· {KIND_NAMES[connection.kind]}</span>
               {isActive && <span style={{ color: colors.muted, fontSize: 11 }}>· active</span>}
             </div>
             <div style={{ color: colors.muted, fontSize: 12, marginBottom: 8 }}>

@@ -34,9 +34,18 @@ export interface Task {
    * was for would be worse than no plan at all.
    */
   plan?: string
+  /**
+   * A turn was running when this was saved. The save that ends a turn clears it, so a task reopened with it
+   * set was cut off - by a crash, or the process being killed (`agent/resume.ts`).
+   */
+  turnRunning?: boolean
+  /** How many times in a row a turn of this task was resumed automatically after a crash. */
+  crashResumes?: number
   /** The strategy this chat follows (Agent team mode), and where its back-and-forth loops stand. */
   strategy?: Strategy
   strategyProgress?: StrategyProgress
+  /** What the decision model picks for each request in this chat: skills, tools or both. */
+  skillToolPicks?: 'skills' | 'tools' | 'both'
   /** Every consultation made under it: what was asked, answered and decided (`StrategyExchange`). */
   strategyExchanges?: StrategyExchange[]
   /**

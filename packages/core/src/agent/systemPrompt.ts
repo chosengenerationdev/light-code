@@ -1,3 +1,4 @@
+import { modelGuidance } from './modelGuidance.js'
 import { COLLECTOR_TOOL_GUIDANCE } from '../dataset/types.js'
 import { buildPlanGuidance } from './plan.js'
 
@@ -6,6 +7,8 @@ export interface SystemPromptOptions {
   model?: string
   /** The profile's label, which is usually how the user refers to it. */
   providerLabel?: string
+  /** The profile's base URL: with the model, it says which family's habits to address (`modelGuidance.ts`). */
+  providerBaseUrl?: string
   /** Set when the Claude CLI expert is available, so `ask_expert` is explained. */
   expertAvailable?: boolean
   /**
@@ -168,6 +171,9 @@ export function buildSystemPrompt(
     '- Before asking, check what is here: the imports and existing calls in this workspace are',
     '  evidence about the version actually installed, and a skill may already describe it.',
   )
+
+  const familyNotes = modelGuidance(options.model, options.providerBaseUrl)
+  if (familyNotes !== undefined) lines.push('', familyNotes)
 
   if (options.skills !== undefined && options.skills.length > 0) {
     lines.push('', options.skills)

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import type { VectorStoreKind } from '../../config/schema.js'
 import type { HttpClient } from '../../platform/http.js'
 import { isSafeCollectionName, RestTransport } from '../restTransport.js'
+import { wrongServerHint } from '../serverKind.js'
 import {
   VectorStoreError,
   type VectorDocument,
@@ -104,7 +105,12 @@ abstract class QdrantBase {
   protected readonly rest: RestTransport
 
   constructor(http: HttpClient, connection: VectorStoreConnection) {
-    this.rest = new RestTransport(http, connection, () => apiKeyHeader(connection))
+    this.rest = new RestTransport(
+      http,
+      connection,
+      () => apiKeyHeader(connection),
+      (body) => wrongServerHint('qdrant', body, connection.label ?? connection.url),
+    )
   }
 
   protected assertName(collection: string): void {
@@ -202,7 +208,11 @@ export class QdrantIndexWriter extends QdrantBase implements VectorIndexWriter {
 
     if (result.status === 404) return undefined
     if (result.status < 200 || result.status >= 300) {
-      throw new VectorStoreError(`Could not read collection "${collection}" (HTTP ${String(result.status)}).`, result.status)
+      throw new VectorStoreError(
+        `Could not read collection "${collection}" (HTTP ${String(result.status)}).` +
+          wrongServerHint('qdrant', result.body, this.rest.label),
+        result.status,
+      )
     }
 
     const vectors = result.body.result?.config?.params?.vectors
@@ -343,7 +353,10 @@ export class QdrantIndexWriter extends QdrantBase implements VectorIndexWriter {
     )
     if (result.status === 404) return { documents: [] }
     if (result.status < 200 || result.status >= 300) {
-      throw new VectorStoreError(`Could not read "${collection}" (HTTP ${String(result.status)}).`, result.status)
+      throw new VectorStoreError(
+        `Could not read "${collection}" (HTTP ${String(result.status)}).` + wrongServerHint('qdrant', result.body, this.rest.label),
+        result.status,
+      )
     }
 
     const documents: VectorDocument[] = []
@@ -393,7 +406,11 @@ export class QdrantIndexWriter extends QdrantBase implements VectorIndexWriter {
       // A collection that does not exist yet is the ordinary first-run case, not an error.
       if (result.status === 404) return []
       if (result.status < 200 || result.status >= 300) {
-        throw new VectorStoreError(`Could not list "${collection}" (HTTP ${String(result.status)}).`, result.status)
+        throw new VectorStoreError(
+          `Could not list "${collection}" (HTTP ${String(result.status)}).` +
+            wrongServerHint('qdrant', result.body, this.rest.label),
+          result.status,
+        )
       }
 
       for (const point of result.body.result?.points ?? []) {

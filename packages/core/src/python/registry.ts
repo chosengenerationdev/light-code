@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { diskLibraryFs, type LibraryFs } from '../library/snapshot.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -104,9 +105,9 @@ export function toolFileName(name: string): string {
   return `${name}.py`
 }
 
-async function readRegistryFile(toolsDir: string): Promise<RegistryFile> {
+async function readRegistryFile(toolsDir: string, io: LibraryFs = diskLibraryFs): Promise<RegistryFile> {
   try {
-    const parsed = JSON.parse(await fs.readFile(path.join(toolsDir, REGISTRY_FILE), 'utf8')) as RegistryFile
+    const parsed = JSON.parse(await io.readFile(path.join(toolsDir, REGISTRY_FILE))) as RegistryFile
     if (parsed.version === 1 && typeof parsed.tools === 'object') return parsed
   } catch {
     // Missing or unparseable both mean "nothing is approved yet", which is the safe reading:
@@ -140,8 +141,10 @@ export async function loadRegistry(
   declined?: Record<string, string> | undefined,
   /** Code approved elsewhere on this machine (Fire Code), by hash. See `machineApprovals.ts`. */
   trusted?: MachineApprovals | undefined,
+  /** Where the folder and its files are read from - see `loadSkills`. */
+  io: LibraryFs = diskLibraryFs,
 ): Promise<LoadedRegistry> {
-  const registry = await readRegistryFile(toolsDir)
+  const registry = await readRegistryFile(toolsDir, io)
   const tools: RegisteredTool[] = []
   const issues: ToolLoadIssue[] = []
   const approvedElsewhere: string[] = []
@@ -167,7 +170,7 @@ export async function loadRegistry(
 
   let entries: string[]
   try {
-    entries = (await fs.readdir(toolsDir)).filter((file) => file.endsWith('.py'))
+    entries = (await io.readdir(toolsDir)).map((entry) => entry.name).filter((file) => file.endsWith('.py'))
   } catch {
     return { tools, issues }
   }
@@ -182,7 +185,7 @@ export async function loadRegistry(
 
     let source: string
     try {
-      source = await fs.readFile(filePath, 'utf8')
+      source = await io.readFile(filePath)
     } catch (error) {
       issues.push({ kind: 'invalid', name, filePath, detail: String(error) })
       continue
@@ -337,6 +340,9 @@ export async function loadRegistries(
   logger: Logger,
   declined?: Record<string, string> | undefined,
   trusted?: MachineApprovals | undefined,
+  /** Told each folder as it is read and how long it took - see `loadSkills`. */
+  onFolder?: (dir: string, tookMs?: number) => void,
+  io: LibraryFs = diskLibraryFs,
 ): Promise<LoadedRegistry> {
   /*
    * Deduplicated **case-insensitively on Windows** (§16).
@@ -362,7 +368,10 @@ export async function loadRegistries(
   const claimed = new Map<string, RegisteredTool>()
 
   for (const dir of unique) {
-    const loaded = await loadRegistry(dir, worker, logger, declined, trusted)
+    onFolder?.(dir)
+    const started = Date.now()
+    const loaded = await loadRegistry(dir, worker, logger, declined, trusted, io)
+    onFolder?.(dir, Date.now() - started)
     issues.push(...loaded.issues)
     approvedElsewhere.push(...(loaded.approvedElsewhere ?? []))
     for (const tool of loaded.tools) {
@@ -421,7 +430,7 @@ export async function loadRegistries(
    */
   const reported: ToolLoadIssue[] = []
   for (const issue of issues) {
-    if (issue.kind === 'shadowed' && (await sameBytes(issue.filePath, issue.winner))) continue
+    if (issue.kind === 'shadowed' && (await sameBytes(issue.filePath, issue.winner, io))) continue
     reported.push(issue)
   }
 
@@ -442,10 +451,10 @@ export async function loadRegistries(
 }
 
 /** True only when both files can be read and hold the same bytes; any doubt keeps the issue. */
-async function sameBytes(first: string, second: string): Promise<boolean> {
+async function sameBytes(first: string, second: string, io: LibraryFs = diskLibraryFs): Promise<boolean> {
   try {
-    const [a, b] = await Promise.all([fs.readFile(first), fs.readFile(second)])
-    return a.equals(b)
+    const [a, b] = await Promise.all([io.readFile(first), io.readFile(second)])
+    return a === b
   } catch {
     return false
   }

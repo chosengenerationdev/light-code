@@ -10,7 +10,8 @@ const bridge = readFileSync(new URL('./bridge.ts', import.meta.url), 'utf8')
 
 describe('reply and reaction wiring', () => {
   it('composes the reply and pending reactions into the next message', () => {
-    expect(bridge).toMatch(/handleSendMessage\(\s*composeUserText\(message\.text, \{ replyTo: boundedQuote\(message\.replyTo\), reactions: takeReactions\(\) \}\)/)
+    // Through startUserTurn, which hands the composed text to handleSendMessage once any scheduled run is done.
+    expect(bridge).toMatch(/startUserTurn\(\(\) => composeUserText\(message\.text, \{ replyTo: boundedQuote\(message\.replyTo\), reactions: takeReactions\(\) \}\)/)
   })
 
   it('delivers reactions at the next step of a running turn', () => {

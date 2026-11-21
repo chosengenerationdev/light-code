@@ -6,8 +6,13 @@ import type { HttpClient, HttpRequestOptions, HttpResponse } from '@light-code/c
  * Generous on purpose. A corporate gateway behind mutual TLS and a proxy can take a while to
  * answer, and a deadline that fired on a slow-but-working link would be worse than none. What
  * this has to beat is the operating system's own connect timeout, which is measured in minutes.
+ *
+ * It was 45 seconds, and that was too short (reported: on a slow office network Fire Code kept
+ * failing to start a conversation while another client managed). A connection alone may now take a
+ * minute (`CONNECT_TIMEOUT_MS` in core), and a busy gateway or a reasoning model can take as long
+ * again before it sends the first byte. This only has to end a dropped connection eventually.
  */
-export const HEADERS_DEADLINE_MS = 45_000
+export const HEADERS_DEADLINE_MS = 150_000
 
 /**
  * Puts a deadline on getting a reply, without putting one on the reply itself.

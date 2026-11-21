@@ -1,6 +1,7 @@
 import type { VectorStoreKind } from '../../config/schema.js'
 import type { HttpClient } from '../../platform/http.js'
 import { isSafeCollectionName, RestTransport } from '../restTransport.js'
+import { wrongServerHint } from '../serverKind.js'
 import {
   VectorStoreError,
   type VectorDocument,
@@ -53,7 +54,12 @@ abstract class ChromaBase {
     private readonly tenant: string = DEFAULT_TENANT,
     private readonly database: string = DEFAULT_DATABASE,
   ) {
-    this.rest = new RestTransport(http, connection)
+    this.rest = new RestTransport(
+      http,
+      connection,
+      () => ({}),
+      (body) => wrongServerHint('chroma', body, connection.label ?? connection.url),
+    )
   }
 
   protected get base(): string {
@@ -84,7 +90,8 @@ abstract class ChromaBase {
     }
     if (result.status < 200 || result.status >= 300) {
       throw new VectorStoreError(
-        `Could not read collection "${collection}" from ${this.rest.label} (HTTP ${String(result.status)}).`,
+        `Could not read collection "${collection}" from ${this.rest.label} (HTTP ${String(result.status)}).` +
+          wrongServerHint('chroma', result.body, this.rest.label),
         result.status,
       )
     }

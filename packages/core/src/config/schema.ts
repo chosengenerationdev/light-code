@@ -1513,6 +1513,59 @@ export const configSchema = z
      */
     autoCompact: z.boolean(),
     /**
+     * Start a new chat from a handoff by itself when this one reaches the context limit, instead of compacting it.
+     * Asked for: "a checkbox, when enabled it should auto handoff to new session when context limit is hit". The
+     * handoff note and the user's own messages carry the work over, and the new chat carries on by itself; the old
+     * chat stays in History. Compacting automatically wins when both are ticked - it was asked for first and keeps
+     * the chat. Off unless set to true.
+     */
+    autoHandoff: z.boolean(),
+    /**
+     * No step limit for a chat's replies: the agent runs until it finishes, is stopped, or fails the same way three times
+     * in a row. Asked for, with the Anti Hallucinator watching and guiding it. Scheduled runs keep `maxIterations` -
+     * nobody is there to press Stop. Off unless set to true.
+     */
+    unlimitedSteps: z.boolean(),
+    /**
+     * Grey suggestions while typing in the chat box, from the chat's own model: Tab takes the next word, Ctrl+Space the
+     * whole suggestion. Every pause in typing is a request to the gateway, so off unless set to true.
+     */
+    composerCompletion: z.boolean(),
+    /**
+     * The decision model (D3 from vLLM Semantic Router, or any OpenAI-compatible model that returns probabilities): a
+     * provider profile, and what it decides. Nothing here does anything until `profileId` names a profile - Agent team
+     * and strategies then work exactly as before. `routing`: in Agent team mode, send each message to the specialist
+     * it picks at `routeThreshold` or above (default 0.75). `judgeLoops`: decide a strategy loop's condition at
+     * `loopThreshold` or above, or its mirror below (default 0.8); in between, the judge's wording decides.
+     */
+    decisionModel: z
+      .object({
+        profileId: z.string().min(1).optional(),
+        /**
+         * Where on the profile's base URL it is asked: blank = automatic (D3's `/systemone`, then chat completions),
+         * a path such as `/d3/v1/systemone` (D3's API there, no fallback), or `chat` (chat completions only).
+         */
+        endpoint: z.string().max(200).optional(),
+        routing: z.boolean().optional(),
+        routeThreshold: z.number().min(0.5).max(0.99).optional(),
+        judgeLoops: z.boolean().optional(),
+        loopThreshold: z.number().min(0.5).max(0.99).optional(),
+        /** The Anti Hallucinator's first pass (decision/firstPass.ts): on unless false; sure at `firstPassThreshold` (0.85). */
+        firstPass: z.boolean().optional(),
+        firstPassThreshold: z.number().min(0.5).max(0.99).optional(),
+        /** Score hand-overs against their connector's contract (on unless false). */
+        scoreHandOvers: z.boolean().optional(),
+        /** In Agent team, say when another specialist fits a consultation better (on unless false). */
+        suggestRoles: z.boolean().optional(),
+        /** Ask whether a changed plan starts new work, so a strategy's loops start again (on unless false). */
+        newTopics: z.boolean().optional(),
+        /** Fire Code monitoring: raise or lower an alert's notification by whether it needs a person now (on unless false). */
+        triageAlerts: z.boolean().optional(),
+        /** The skill-and-tool picks (switched on per chat, beside the chat): an option is suggested at this or above (0.25). */
+        suggestThreshold: z.number().min(0.05).max(0.95).optional(),
+      })
+      .optional(),
+    /**
      * Model requests that fail or go silent. `stallSeconds`: how long a request may send nothing at
      * all before it is stopped and sent again (0 = never; default 300). `retries`: how many times a
      * dropped connection, 5xx, 429/529 or stall is retried before the error is shown (default 3).

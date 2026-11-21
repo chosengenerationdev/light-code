@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import { watchFile } from 'node:fs'
-import type { CredentialSummary, JupyterHubSpec, MonitorExecutorChannel, MonitoringChannel } from '@light-code/core'
+import type { CredentialSummary, JupyterHubSpec, MonitorExecutorChannel, CodebaseAgentChannel, MonitoringChannel } from '@light-code/core'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import {
@@ -123,6 +123,8 @@ export interface ServerOptions {
   /** Fire Code's monitoring (`controlChannel.ts`): see `HostServices.monitoring` and `monitorExecutor`. */
   monitoring?: MonitoringChannel
   monitorExecutor?: MonitorExecutorChannel
+  /** Fire Code's relay between codebases' agents (`controlChannel.ts`): see `HostServices.codebaseAgents`. */
+  codebaseAgents?: CodebaseAgentChannel
   extraToolDirs?: string[]
   /**
    * Opens the one user's session at start, with no browser attached: Fire Code's monitoring executor has no
@@ -133,6 +135,8 @@ export interface ServerOptions {
   reachAnywhere?: boolean
   /** See `SessionOptions.sharedWorkspace`. */
   sharedWorkspace?: boolean
+  /** See `SessionOptions.resumeInterrupted`. */
+  resumeInterrupted?: boolean
   /** See `SessionOptions.noSchedules`. */
   noSchedules?: boolean
   /** See `SessionOptions.siblings`. */
@@ -149,6 +153,8 @@ export interface ServerOptions {
   siblingHubs?: { name: string; spec: JupyterHubSpec }[]
   /** See `SessionOptions.machineApprovalsFile`. */
   machineApprovalsFile?: string
+  /** See `SessionOptions.personalDir`. */
+  personalDir?: string
   /** See `SessionOptions.fastFs`. */
   fastFs?: string
   /** See `SessionOptions.secretsKey`. */
@@ -487,11 +493,13 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       ...(options.secretsFile !== undefined ? { secretsFile: options.secretsFile } : {}),
       ...(options.desktopNotify === true ? { desktopNotify: true } : {}),
       ...(options.monitoring !== undefined ? { monitoring: options.monitoring } : {}),
+      ...(options.codebaseAgents !== undefined ? { codebaseAgents: options.codebaseAgents } : {}),
       ...(options.monitorExecutor !== undefined ? { monitorExecutor: options.monitorExecutor } : {}),
       ...(options.extraToolDirs !== undefined ? { extraToolDirs: options.extraToolDirs } : {}),
       ...(options.secretsKey !== undefined ? { secretsKey: options.secretsKey } : {}),
       ...(options.reachAnywhere === true ? { reachAnywhere: true } : {}),
       ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
+      ...(options.resumeInterrupted === true ? { resumeInterrupted: true } : {}),
       ...(options.noSchedules === true ? { noSchedules: true } : {}),
       ...(options.siblings !== undefined ? { siblings: options.siblings } : {}),
       ...(options.changeLedger !== undefined ? { changeLedger: options.changeLedger } : {}),
@@ -500,6 +508,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       ...(options.jupyterHub !== undefined ? { jupyterHub: options.jupyterHub } : {}),
       ...(options.siblingHubs !== undefined ? { siblingHubs: options.siblingHubs } : {}),
       ...(options.machineApprovalsFile !== undefined ? { machineApprovalsFile: options.machineApprovalsFile } : {}),
+      ...(options.personalDir !== undefined ? { personalDir: options.personalDir } : {}),
       // Fire Code's saved credentials, for Python tools that declare one (names only; values stay in the vault).
       ...(options.credentialsFile !== undefined ? { savedCredentials: readCredentials } : {}),
       ...(options.fastFs !== undefined ? { fastFs: options.fastFs } : {}),

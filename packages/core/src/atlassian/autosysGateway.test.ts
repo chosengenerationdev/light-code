@@ -121,11 +121,16 @@ describe('the gateway form', () => {
   /* One Save for the panel: the gateway goes with the site settings, after them, never concurrently. */
   it('is saved by the same handler as the site, after it, and refusals go to the panel', () => {
     const bridge = readFileSync(new URL('../host/bridge.ts', import.meta.url), 'utf8')
+    // The panel's handler routes a refusal to the panel; the save itself (shared with `devops_setup`) does the work.
     const start = bridge.indexOf('  async function handleSaveAtlassian(')
     const handler = bridge.slice(start, bridge.indexOf('\n  }\n', start))
-    expect(handler.indexOf('saveAutosysGateway(')).toBeGreaterThan(handler.indexOf("await configManager.save('user'"))
+    expect(handler).toContain('saveAtlassianSettings(product, input, token, gateway)')
     expect(handler).not.toContain("type: 'error'")
     expect(handler).toContain("type: 'atlassianTest', product, ok: false")
+    const saveStart = bridge.indexOf('  async function saveAtlassianSettings(')
+    const save = bridge.slice(saveStart, bridge.indexOf('\n  }\n', saveStart))
+    expect(save.indexOf('saveAutosysGateway(')).toBeGreaterThan(save.indexOf("await configManager.save('user'"))
+    expect(save).not.toContain("type: 'error'")
   })
 
   it('sends the gateway token and the AutoSys Basic sign-in together, in their own headers', async () => {

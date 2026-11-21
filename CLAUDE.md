@@ -209,6 +209,9 @@ the project.** Reversed by the user on 2026-08-09; two tools (`search_codebase`,
 Browser automation was raised again in Phase 3 and **stays excluded** — no browser tool,
 no bundled browser MCP server. A user who wants it configures a Chrome DevTools MCP server
 themselves once Phase 5 lands, which needs nothing from us.
+**One narrow exception, decided by the user on 2026-11-21 (§12bd):** `ask_web_chat` drives the user's *own*
+Chrome DevTools MCP server to replay one approved request in the organisation's web chat page. Still no bundled
+server, and the agent is given none of Chrome's tools - only that one request. Do not widen it into general browsing.
 
 **Two tools arrive after v1**, both added to the plan during Phase 3:
 `read_tool_result` (already built — the re-read half of result truncation, §12) and
@@ -1091,6 +1094,14 @@ find it in the local as it belongs to different user or project"*.
 - **`identity.owner` is user-scope only** (invariant 5), defaulting to the OS user name resolved
   at the host boundary. A repository able to set it could attribute what it indexed to a
   colleague — the sort of claim nobody thinks to go and check.
+- **A connection's type must match its server** (VS Code 0.206.0, reported: "Could not read collection
+  … (HTTP 400)" while Test connection passed, and renaming the project changed nothing). The add form
+  starts on Qdrant; a team's OpenSearch address saved that way answers Qdrant's `/collections/<name>`
+  with OpenSearch's 400 "no handler found". Test connection pinged as OpenSearch whatever the type, so
+  it passed. `rag/serverKind.ts`: `identifyServer` recognises each backend from its own answers,
+  `probeVectorStore` is Test connection in the connection's type (root first, then the type's own
+  check), and Qdrant/Chroma failures append "answers like OpenSearch, but this connection's type is
+  Qdrant" (`RestTransport`'s `explain`). Each row in Settings → Search shows its type.
 
 ---
 
@@ -3750,6 +3761,514 @@ strategies are saved to a library and each chat uses one or none.
 - Observers' instructions are editable too (`observers.<role>.prompt`; the reply format and running-notes rule
   are always appended, so an edit cannot break parsing or the handoff).
 
+## 12as. Gemini through an OpenAI-compatible gateway, hub reconnection, handoffs that continue (VS Code 0.207.0, host 0.182.0, Fire Code 0.80.0)
+
+Asked for together. Gemini (4, at the office, through an OpenAI-compatible endpoint) "more powerful", with the user's
+condition stated twice: **nothing may change for Qwen (qwen3.8-27b, vLLM) on the same wire format.**
+
+- **Everything Gemini-specific is behind `isGeminiModel(model, baseUrl)`** (`providers/geminiCompat.ts`: "gemini"
+  anywhere in the id, or Google's host). `geminiCompat.test.ts` ends with a Qwen block pinning the request byte for
+  byte (tools via `toOpenAITools`, no `extra_content`, no `extra_body`, `<think>` split, `<thought>` left alone).
+  **The one change that reaches Qwen**: tool calls a stream made but never announced with
+  `finish_reason: "tool_calls"` are yielded at `[DONE]`/end (`unannouncedToolCalls`) - they were dropped. And the loop
+  says in the tool result when extra calls in one message were not run (`extraCalls`) - only when there were extras.
+- **Thought signatures** (`ToolCall.signature`): Gemini 3 and later refuse a request whose earlier calls come back
+  without them (HTTP 400). OpenAI-compatible: `extra_content.google.thought_signature` on the tool call, both ways.
+  Native: `thoughtSignature` on the functionCall part. Kept with the conversation (tasks are saved whole). A call with
+  none gets `skip_thought_signature_validator` (Google's documented placeholder) unless the id says Gemini 1.x/2.x
+  (`requiresSignature`) - so an unversioned gateway alias is treated as needing them. **Gemini 4's own rules were not
+  public when this was written**; the family's are assumed.
+- **Schemas** (`toGeminiCompatTools`, used by both Gemini adapters): refused keywords dropped but their meaning written
+  into the description ("Default: 10. Minimum 1."); `$ref` inlined; `allOf` merged; null unions become `nullable`;
+  enum unions merged; number enums offered as strings and turned back (`Reshaped.kind: 'number'`); **a free-form
+  object** (no declared properties - `call_tool`'s `arguments`, Jira `fields`, dataframe `rows`) is offered as JSON
+  text and parsed back before the tool sees it (`restoreArguments`, by path, `[]` for array items). The old
+  `toGeminiTools` pruning left such objects empty, which Gemini refuses - `call_tool` could not have worked.
+  `geminiCompat.test.ts` converts **every tool core defines** (133) and fails on anything Gemini refuses, and fails on
+  any tool parameter without a description (16 tools lacked some; all described now).
+- **Streams**: missing call ids synthesised, parallel calls without `index` kept apart (Gemini only).
+- **Thoughts**: with Thinking on, `extra_body.google.thinking_config.include_thoughts`, and `<thought>` tags routed to
+  the reasoning trace (`ThinkTagSplitter('thought')`). Refused by a gateway: asked again without, remembered per
+  base URL (the `stream_options` pattern).
+- **Prompt**: `agent/modelGuidance.ts` adds a short section for Gemini only (function calling only, one call per
+  reply, exact parameter names, JSON-text parameters, do it in the same reply, SEARCH text without line numbers).
+  Fixed per session, so the cached prefix is stable.
+- **Agent team specialists on a Gemini profile run in-process**, not in `fire-fs agent`: the Rust process does not
+  carry signatures. Observers (Auditor, Anti Hallucinator) make no tool calls and stay in Rust.
+- **Not verified against a live Gemini** - against the documented wire shapes only.
+
+**JupyterHub agents stopped until restarted** (reported). `jupyter/kernel.ts` treated a dropped kernel WebSocket as a
+lost kernel: the run ended, and the next started a new kernel. Now: a drop reconnects to the **same kernel** (hub asked
+whether it is alive, `kernelState`), with `session_id` on the channel URL so Jupyter Server replays what it buffered
+and a cut-off run finishes; if it kept nothing, the kernel going idle twice ends the run as `OutputLost` rather than
+waiting for the timeout; a half-open channel is found by a control-channel `kernel_info_request` heartbeat during runs;
+about a minute of retries before `ConnectionLost` (state kept). `JupyterClient.call` has a deadline (two minutes,
+20 s for kernel status/interrupt/shutdown, 90 s for a start) - a quiet connection hung the agent forever - and a
+**stopped server (424/503) is started** through the hub API (`/hub/api/users/<user>/server`, or `servers/<name>`),
+polled until ready, and the call retried once; a token that may not start servers gets the old message.
+`reconnect.test.ts` drives a fake hub that cuts the channel; 5 of its 8 tests fail on the old kernel code.
+**Not verified against a live hub**, nor the replay against a real Jupyter Server.
+
+**A handoff carries on by itself** (asked for). `handleHandoff` no longer adds the note to the conversation; it shows
+it (`taskRestored`) and sends it through `startUserTurn` - the sendMessage path, extracted - so approvals, the step cap
+and saving apply. `handoffProgress` `done` carries `continuing: true` and the panel shows the turn running.
+`apps/host/src/handoff.test.ts` checks the model is asked to continue with exactly one user message, the handoff.
+
+**Monitoring "Start a chat" opened empty** (reported again after 0.75.0's fix of the message shape). The chat page
+posts `ready` to Fire Code when its script runs, but the app mounts only after the page connects - for a new chat,
+after its agent starts - so the alert text arrived with nothing listening. `apps/host/src/client/appInbox.ts` holds
+messages for the app until one more listener has subscribed than before render (`transport.listenerCount()`).
+**Not verified in a running Fire Code window.**
+
+## 12at. Agents asking each other, and another codebase's hub kernel (VS Code 0.208.0, host 0.183.0, Fire Code 0.81.0, JetBrains 0.4.65)
+
+**`hub_inspect` / `hub_run` take `hub`** (asked: can codebase 1's agent read about the libraries on codebase 2's named
+server?). Files were already readable (`hub_browse`). `OtherHub` in `jupyter/tools.ts`: each sibling hub gets a
+`KernelSession` of this session's own, started on first use and disposed with the session - the other codebase's chat
+and kernel are never touched. There, `code` and `shell` (cwd a folder on that server, `..` refused); `file` is refused
+(it is a local workspace script). A codebase with no hub of its own gets `hub_run`/`hub_inspect` only, `hub` required.
+The approval names the server. `otherHubs.test.ts`.
+
+**One codebase's agent asks another's** (asked: "agent from one code base can talk to another agent ... to get help or
+do certain things"). `agents/codebaseAgents.ts` (core), `controlChannel.ts` `agents()` (host), `agents.rs` (Fire Code).
+- **Over the control line Fire Code already has to each host**, never a socket: host → `agentAsk` / `agentDone`
+  (`light-code-monitor:` stdout lines, the same prefix monitoring uses - `monitor_line` hands agent lines to
+  `agent_line` first), Fire Code → `agentTask` / `agentReply` (stdin). A task for a tab whose host is not up yet is
+  queued and sent at its `Url` event; the host queues tasks until the session registers its handler.
+- **A visible tab, not a hidden consultation**: Fire Code opens a new chat on the target codebase ("From <asker>:
+  <first line>") with `new_chat_with(..., focus: false)` - it starts without taking the screen - and the request becomes
+  that chat's first message, run through `startUserTurn` (the typed-message path), so **its approvals are asked in its
+  own tab**. The other agent may change its codebase; a change made out of sight and approved elsewhere is what
+  invariant 8 rules out. `hostTurnStarted` makes the panel show it running.
+- **The answer** (`answerFromConversation`): the `attempt_completion` result, else the `ask_followup_question` it
+  stopped on (the asker is told it waits for the user in that tab), else its last text. `agentDone` is accepted only
+  from the tab the task was given to. A target host that exits answers "stopped before it answered"; an asker that
+  exits has its asks dropped.
+- **An answered tab archives itself** (asked for: "silently archive it once done"): `agents.answered`, handled on the
+  3-second tick three seconds after the answer (so the chat has saved), through `close_chat` - the Close button's own
+  code, moved out of the command handler. Kept when it stopped to ask the user (`agentDone.waiting`), failed, is the
+  tab on screen (archived once you leave it, given up after a day), or has been carried on in (agent not idle).
+- **Bounded**: `depth` travels with each ask (`workingForDepth` in the bridge), refused past `MAX_DEPTH` (3) in core and
+  in Rust; `ask_codebase_agent` is `command` (approved, with the literal request) and in
+  `NEVER_AVAILABLE_TO_SCHEDULES` (nobody to approve the other side at 3am). Waits up to `timeoutMinutes` (30, max
+  120); Stop or the timeout leave the other agent working and say so.
+- `apps/host/src/codebaseAgents.test.ts` runs two real hosts and a relay doing Fire Code's routing: approve the ask,
+  the other host starts by itself with the request, its attempt_completion comes back as the tool result.
+  **Not verified in a running Fire Code window** - the Rust routing is compiled, not driven.
+
+**Compact tables and pictures in a wide window** (VS Code 0.209.0, host 0.184.0, Fire Code 0.82.0; reported: users kept
+to VS Code to avoid Fire Code's widened tables). Markdown tables are `width: auto` (were `100%` of the reply); a chart or
+diagram with no `size` is drawn `large` (`DEFAULT_DISPLAY_SIZE`, was `full`). Text is unchanged - it already uses the
+reply's full width. The narrow VS Code panel looks the same either way.
+
+## 12au. Excel charts and pivot tables, the Files button, resuming after a crash, DevOps setup (VS Code 0.211.0, host 0.186.0, Fire Code 0.84.0)
+
+Asked for together.
+
+- **`excel_chart` and `excel_pivot_table`** (`tools/excelCharts.ts`, worker `Invoke-ExcelChart` / `Invoke-ExcelPivot` /
+  `Invoke-ExcelRangeShape`). Named actions, as `excel_sheets` (chart: list/create/update/delete/picture; pivot:
+  list/create/read/refresh/delete). Types and summaries cross as **names**, mapped to Excel constants in the worker
+  (`$script:ChartTypes`, `PivotFunctions`); a test holds the TypeScript enums to the worker's tables. The preview reads
+  the data block live through the same `Get-DataRange` the create uses (headings listed, an unknown pivot field
+  flagged). Results carry each series' SERIES formula (what is really plotted) and the pivot's numbers; `picture`
+  exports a PNG returned as a tool image. Both `edit`, `ALWAYS_ASK_TOOLS`, `NEVER_AVAILABLE_TO_SCHEDULES`, nothing saved.
+  A failed create removes what it made (chart, pivot, added sheet) - a busy Excel retries the whole request.
+  **Verified against a real Excel 16 in a private hidden instance** (scratch workbook, never the user's), which found
+  three things reading could not: **a `Range` returned bare from a PowerShell function is unrolled into its cells**
+  (return `,$range`); pivot field collections must be **called** (`RowFields()`), read as properties they are empty;
+  and a combo chart reports type -4111 (`combo`).
+- **The Files button** (`ui/ArtifactsButton.tsx`, `artifacts/artifacts.ts`, messages `requestArtifacts` /
+  `describeArtifact` / `openArtifact`), for folders with no git. Two facts kept apart: **written by the agent**, read
+  from this chat's tool calls (file tools, Excel create/save, transfer, archive create; `call_tool` unwrapped; with the
+  `why`), and **changed since the chat started** (mtime - catches shell and script output). Walk via `walkFiles`
+  (.gitignore honoured) minus hidden folders and environments; newest 400 plus every agent-written file; a one-line
+  summary from the first 4 KB of small text files. Details on demand through `confine` and the deny list. Open/reveal are
+  `HostUi.openWithDefaultApp` / `revealInFolder` (VS Code: `openExternal`, `revealFileInOS`; local Node host and Fire
+  Code: `platform/node/openWith.ts`, explorer.exe with the path as an argument); absent on `--server`, and the panel then
+  shows neither. Text and code open in the editor where there is one.
+- **Resuming after a crash** (`agent/resume.ts`). `Task.turnRunning` is saved with every mid-turn save and cleared by
+  the end-of-turn save (`turnInFlight`, not `userTurnRunning`, which is still true when that save runs). Fire Code sets
+  `Runtime.crashed` on an unexpected exit and its next start passes `--resume-interrupted`
+  (`HostServices.resumeInterrupted`, never with `--server`); the host then waits for the MCP servers (`mcpStarted`) and
+  starts a turn with `RESUME_PROMPT` (shown, `hostTurnStarted`). The unanswered tool call is answered by
+  `repairUnansweredToolCalls` as on every request. **Only after a crash**: a chat stopped on purpose or reopened from
+  History waits (opening one by hand clears the mark on disk). **At most three in a row** (`Task.crashResumes`, reset when
+  a turn finishes). `apps/host/src/resumeInterrupted.test.ts` drives two real hosts over one data folder.
+- **`devops_setup`** (`tools/devopsSetup.ts`). The rule that shapes it: **secrets never pass through the model.** The
+  assistant proposes the ordinary settings (approved as shown); after approval the tool asks for the token, password or
+  client secret in a form whose fields are `secret` (a password box), and stores them. `FormField.secret` is new: the
+  panel renders a password input, and `ask_user_form` returns only "(entered - not shown)" for one (`withoutSecrets`).
+  Derived values are built host-side: `basicHeaderValue` makes `Basic <base64(user:password)>` (or the base64 alone, or
+  plain) for AutoSys behind a gateway (`gatewayWithHeaderValue`), and only that value is stored. Saves through
+  `saveAtlassianSettings` and tests through `testAtlassian` - split out of the panel's handlers, which now call them -
+  so a setup and a panel save cannot differ. Credential-looking keys in `settings` are refused. `edit`, always asks,
+  never scheduled, absent on `--server` (`HostServices.sharedServer`). **Not verified against a live Jira or AutoSys.**
+
+## 12av. Folders in `@`, a quick first reply, a slow network, moving a setup (VS Code 0.212.0, host 0.187.0, Fire Code 0.85.0, fire-fs 1.3.0)
+
+Asked for together, from real use.
+
+- **`@` matches folder names** (`context/mentionSearch.ts`). A file index matches file names only, so `@reports`
+  never found what sits in `reports/`. `findFiles` has a third mode, `folders`: VS Code asks for `**/*seg*/**` and
+  recovers the folders (`foldersOf`, `findFiles` returns files only), the Node walk collects directories, and fire-fs
+  `names` takes `folders: true` - **and echoes it**, so the host uses the helper's answer only when the helper
+  understood (an older one ignores the flag and returns files). Folders are offered as `folder/`, ranked by their own
+  name like files; the best two have their files listed; a file inside a matching folder ranks after name matches
+  (`rank` 3.25-3.75). A typed path (`src/abc/`) searches inside that folder first (`root`, confined: a path above the
+  base is never searched), and VS Code now honours `root` with a `RelativePattern`. Choosing a folder keeps the picker
+  open (`opensInside`, as `name:` does) unless its path has a space (it is quoted, and typing on would land outside).
+- **The first reply waited for everything in turn.** `handleSendMessage` awaited the window probe (up to 10 s), the
+  expert check, skills, codebase instructions, MCP, then Python's setup (uv, venv, worker, loading every tool) one
+  after another, and only MCP was started when the panel opened. Now a **warm-up** at bridge construction (beside
+  `mcpStarted`) runs secrets, skills, Python, the git check, the expert check, the gateway token
+  (`resolveHeaders`, which also opens the pooled connection) and the window probe; the send path starts its own copies
+  with `early()` and awaits each where it is used. **`configurePython` serialises every `python.configure`** (two at
+  once could start two workers) - call it, never `python.configure`, in the bridge. `gitAvailable()` caches the git
+  check (a process start every turn). The OpenSearch index list for the search tool's description is cached five
+  minutes and capped at five seconds (`indexNamesFor`). **Not measured in the office**; the cause was found by reading.
+- **A slow network failed at once, and was never retried.** Two causes. (1) `describeTlsError` turned transport
+  failures into sentences without their codes, and the reset sentence mentioned a "client certificate", which
+  `transient.ts`'s PERMANENT read as permanent - so ECONNRESET, connect timeouts, EAI_AGAIN and ECONNREFUSED ended the
+  reply on the first try. Codes now stay in brackets (`transportCode`), PERMANENT names only real certificate failures,
+  and ENOTFOUND and "Connect Timeout" are transient. `resilience.test.ts` runs undici-shaped errors through both.
+  (2) undici's connect timeout is 10 s; Node's `https` (Roo Code's OpenAI client) has none. `CONNECT_TIMEOUT_MS` = 60 s
+  on both agents (and the proxy hop), and Happy Eyeballs gets 1 s per address instead of 250 ms. The Node host's
+  header deadline went 45 s -> 150 s (it must exceed the connect allowance). **Not verified on the office network.**
+- **Fire Code setup export/import** (`apps/sun/native/src/setup.rs`, Settings → Setup). One JSON file
+  (`format: fire-code-setup`, version 1): every codebase's name, folder, open chats by name (first chat first), accent,
+  keep-awake, hub (url, user, server, folders, kernel, **the token's credential label, never its id or value**) and,
+  if ticked, its config.json (which holds only secret references, §15). Import previews first (`ChooseSetupImport`
+  -> `setupPreview`, held in `setup_import`), each folder editable with Browse (`PickSetupFolder`), a folder already
+  in Fire Code skipped, a hub codebase given a saved credential (matched by label) or a pasted token through
+  `hub_credential`; codebases are created `ConfigMode::New` with the file's settings written in when ticked, chats
+  numbered 2.. under their names. Conversations, archived chats and branch folders do not travel. `shell.test.ts`
+  drives the dialog; the Rust module has its own tests. **Not verified in a running Fire Code window.**
+
+## 12aw. Hub git from any chat, chats that start without waiting, boxes in the flow (VS Code 0.213.0, host 0.188.0, Fire Code 0.86.0)
+
+Reported together, from real use.
+
+- **Pull on a hub codebase said "Open the codebase first"** while its chat worked, until Fire Code restarted. `askHubGit`
+  posted only to the *first* chat's page, which `parkIdlePages` unloads after `unloadMinutes` when another chat is on
+  screen. `askCodebase` (shell.js) now asks any loaded, ready page of the codebase (idle first - a host refuses hub git
+  mid-turn), else loads a running chat's unloaded page and queues the ask in `pendingAsks` (a page with a pending ask is
+  not unloaded), else, when `wake`, starts the first chat. The 60 s status refresh and the after-commit refresh pass
+  `wake = false`: never wake a codebase or reload a page for a badge. "Write with agent" uses it too.
+  `shell.test.ts` "git on the hub" drives the real Pull button; all three fail on the old function (checked).
+- **A chat took minutes to answer after a crash or a sleep.** Each chat is its own host, and its first turn (and the
+  crash resume, which awaited `mcpStarted`) waited for **every** MCP server to start and list its tools. Servers are
+  children of the host that talks to them, so they are not shared; what they offer is: `mcp/toolCache.ts`,
+  `<codebaseDir ?? storageDir>/mcp-tools.json`, written whole (re-read and merged) after every live `tools/list`,
+  keyed by server name and used only while `connectionSignature` matches. `McpRegistry.configure` primes a server's
+  tools from it (`fromCache`); a call to a primed tool waits for `liveConnection`. `ensureReady(45 s)` starts every
+  server and waits only for those with no tools yet, and never longer than 45 s - the turn and the resume use it; a
+  primed server that then fails has its remembered tools withdrawn. **`connectServer` is single-flight now**: the
+  panel-open start and a message's own check each used to start the same server when they overlapped.
+  The warm-up and every MCP connect log `[startup] … ready after Ns` when slow, so the next report names the part.
+  Python was read and is not the cost (approved tools load from `.registry.json` with no worker; `uv --version` and a
+  stat). `mcp/toolCache.test.ts` runs a real slow server through two registries on one cache file.
+  **Not measured at the office** - the cause was found by reading; the `[startup]` lines are there to confirm it.
+- **Boxes as steps of the flow** (asked for: connect a box to an agent or another box; "normal boxes" whose agents all
+  complete before the flow moves on). `StrategyGroup.kind`: `parallel` (absent = parallel, every box saved before) or
+  `together` (done in their own order). An edge's `from`/`to` may be a group id. `strategyOrder` orders boxes as one
+  unit (`orderBy` over units, then each box's members by its internal edges); `describeStrategy` introduces each box
+  with what it waits for and says where the flow goes once every step inside has answered. Contracts on a box end are
+  told to every member (`targetName`); `requires` on an edge *from* a box are folded into the contract, not checked -
+  no single answer holds them all. Problems: a back-and-forth touching a box, a box joined to its own member, a
+  connected empty box; a role twice is a problem only in a parallel box. `set_strategy_contracts` names a box by its
+  label. The window: a dot on each box's right edge, Connect to... on a selected box, a drop on a box connects to it
+  (smallest box under the pointer), and the box kind is switched on the right. `strategy/boxes.test.ts`.
+- **Step instructions take `@`** (`ui/MentionTextarea.tsx`, the composer's picker for any transport - it asks
+  `requestMentionCandidates` and listens for its own query's answer). In `consultAgent` the strategy notes are run
+  through `resolveMentions` + `attachMentions` when they contain `@` - the chat's own confinement, deny list and
+  sibling codebases. **Not verified in a real webview.**
+
+## 12ax. A strategy stays with its chat (VS Code 0.214.0, host 0.189.0, Fire Code 0.87.0, JetBrains 0.4.70)
+
+Asked for: every new topic in a chat follows its strategy; the strategy is selected again after a handoff; different
+chats keep different strategies, persisted; a new chat starts with none (since reversed for "+" - see §12az).
+
+- **The reload path never restored steering.** `restoreActiveTaskOnLoad` put back the conversation only, so a window
+  reload, a Fire Code chat waking from sleep and a restart after a crash all lost the plan **and** the strategy -
+  only opening from History (`openTask`) restored them. Both now go through `adoptSteering` + `postSteering`.
+- **An empty chat's choice was not saved**: `persistActiveTask` returns early for an empty conversation, so a
+  strategy chosen before the first message (or carried in by a handoff before its first save) died with a reload.
+  `agent/chatSteering.ts` keeps it in `<storageDir>/pending-chat/<workspace digest>.json` (written whole, read
+  back through `strategySchema`), removed by the first task save and by `startNewTask`; never by a scheduled run's
+  set-aside conversation (`backgroundRun`). In Fire Code `storageDir` is the chat's own folder, so each chat has its own.
+- **A new topic is a new run of the strategy.** The prompt says the strategy applies to every request, including a new
+  topic after an earlier one is finished, with a new `update_plan` each time. Loops were counted for the whole chat, so
+  the second topic would have found the first one's rounds used up and been refused: `applyPlan` resets
+  `strategyProgress` when `startsNewWork` (`agent/checkpoints.ts`) says the plan is new work - no plan before, every
+  old step done, or no old step kept. A revision keeps the count (editing a plan must not hand out fresh rounds). The
+  exchange log is kept.
+- Handoff already carried the strategy (§12ar); unchanged. `apps/host/src/strategyPerChat.test.ts` restarts a real
+  host on one data folder through every case above and fails on the old restore (checked); `agent/newWork.test.ts`.
+
+## 12ay. Custom roles in a strategy, lean main context, startup bar, automatic handoff, no step limit (VS Code 0.215.0, host 0.190.0, Fire Code 0.88.0)
+
+Reported and asked for together.
+
+- **`ask_agent` refused every custom role.** It checked `isAgentRole(role)` with no definitions - the five built-ins -
+  before looking at the team, which does include custom roles. It now finds the role in the team by id **or name**
+  (case, spaces, `_`/`-` folded), and lists the team's roles when one is unknown. The strategy text names a custom
+  role's id beside its name (`askAs`), since the model was handed the display name and `ask_agent` takes the id.
+- **Under a strategy, hand-overs go specialist to specialist** (asked for: specialists keep their own context, and
+  the main chat must not fill up). `handOverSources` (strategy.ts): every step connected into this one, a box's steps
+  for a box source, and the other side of a back-and-forth. `consultAgent` attaches their latest full answers
+  (`strategyAnswers`, this topic only - `strategyTopicSince`, reset with the loops; capped 24,000 characters) and asks
+  for a "Summary for the main agent" (`SUMMARY_REQUEST`). The main agent gets `answerForMain`: that section, the
+  whole answer when short (≤2,500), else the start - each with a pointer to `strategy_history`. Contract checks and
+  loop verdicts still read the full answer; the exchange log keeps 4,000 characters as before. The prompt tells the
+  main agent not to paste earlier answers. `strategyEndToEnd.test.ts` checks the tester receives the programmer's
+  answer directly.
+- **Startup bar** (`ui/StartupProgress.tsx`, message `startupProgress`, asked on mount with `requestStartupProgress`):
+  the warm-up's parts by name (`trackStartup` inside `timed`) and each MCP server still `connecting` with no
+  remembered tools (`mcpStartingSince`), each with its start time; deduplicated before posting; empty hides it.
+- **Hand off automatically** (`autoHandoff`, beside Compact automatically in the token bar; one unticks the other).
+  `RunAgentTurnOptions.onContextFull`: with `autoCompact` off, the loop checks the size before each request (on size
+  alone - `minimumToCompact: 0`, a handoff needs no older stretch to summarise) and on an overflow refusal, calls it and
+  ends the turn quietly; `startUserTurn` then runs `handleHandoff`, whose new chat carries on. Passed only when the chat
+  already holds an earlier user message, so a chat full on its first message (a handoff's opening, one huge paste)
+  cannot hand off for ever. Never for scheduled runs.
+- **No step limit** (`unlimitedSteps`, Settings → Approvals): `maxIterations: Infinity` for chat turns only - a scheduled
+  run keeps `maxIterations`. The three-consecutive-failures stop and Stop still end a turn. Personal on a shared server.
+- `autoHandoff` and `unlimitedSteps` are top-level user settings, shared with `autoCompact` in the export section.
+  Tests: `tools/askAgent.test.ts` (custom roles), `strategy/boxes.test.ts` (hand-overs, summaries),
+  `agent/autoHandoff.test.ts`, `handoff.test.ts` (automatic handoff and the startup messages on a running host),
+  `StartupProgress.test.tsx`, `host/unlimitedSteps.test.ts`. **Not verified in a running VS Code or Fire Code window.**
+
+## 12az. A start that took four and a half minutes (VS Code 0.216.0, host 0.191.0, Fire Code 0.89.0)
+
+Reported right after the startup bar shipped: "Skills" and "Python tools" on it for 4 min 30 s - real (they finished
+then), not a stale bar, and the first reply had been waiting on both all along (the earlier "90 seconds" reports).
+Cause **not yet confirmed**; this release makes it visible, survivable and less likely:
+
+- **The bar names the step**: `loadSkills` and `loadRegistries` take an `onFolder(dir, tookMs?)` callback, and
+  `PythonManager` an `onProgress(step, tookMs?)` (checking for uv, finding an interpreter, the virtual environment,
+  reading tools in a folder). `startupStep` shows it after the part's name; `noteSlowStep` logs any step over 2 s as
+  `[startup] … took Ns` - the next report names the folder.
+- **A reply no longer waits for minutes**: `boundedWait` - 20 s for skills, 45 s for tools (MCP's own `ensureReady`
+  allowance). Past that the turn goes ahead with what has loaded and logs it; the rest is there for the next message.
+- **Leading suspect, mitigated**: libuv's thread pool (4 threads, shared by every async file read, `dns.lookup` and
+  some crypto). One slow or unreachable network path - a disconnected mapped drive, a slow share, a slow DNS name - can
+  hold all four, and plain file reads then finish together minutes later, which is what was seen. `UV_THREADPOOL_SIZE`
+  is set to 32 by Fire Code when it starts each chat's Node (`host.rs`, kept if already set) and at the top of the host's
+  `main()`. **The VS Code extension host cannot be changed this way** (its pool is in use before activation).
+- **"+" keeps the strategy** (reported: "clicking + didnt carry the selected strategy"; asked and chosen over a
+  default-strategy setting). This **reverses §12ax's "a new chat starts with none"**: a chat with no strategy still gives
+  one with none. In-process (`newTask`): the bridge re-applies the chat's strategy after `startNewTask` (fresh loops).
+  Fire Code's + is a new process: `newBlankChat` (shell.js) asks the tab being left `ask: 'shareStrategy'`; its page
+  requests `strategies` from its host and posts `carryStrategy` back; the next `select` of a tab new to that codebase is
+  the target, and `pendingAsks` delivers `ask: 'useStrategy'` with the whole strategy (its chat-agreed contracts too)
+  once that page is ready. `useStrategy` accepts `strategy`, validated by `strategySchema`. Archived chats reopened from
+  the + menu keep their own. `shell.test.ts` "a new chat from +", `strategyPerChat.test.ts`.
+  **Fixed in 0.217.0**: the first version cleared the chat, then applied the strategy in a second awaited step, so a
+  chat opened from History in between had its strategy progress overwritten. `startNewTask({ keepStrategy })` now
+  takes it in the same synchronous step that clears. Found by `strategyEndToEnd.test.ts` under load, whose wait for the
+  reopened chat now matches that chat's update by its exchanges (the new chat posts a strategy update of its own).
+
+## 12ba. AutoSys timing: run time, ETA, usual start, predecessors (VS Code 0.217.0, host 0.192.0, Fire Code 0.90.0)
+
+Asked for: a job's average run time; an ETA, in local time, for one running now; the normal start time of a job with no
+start time that a dependency starts; and every predecessor recursively to the topmost job, with statuses - "it needs to
+use the job definitions". Three read tools in `atlassian/autosys.ts`, the arithmetic pure in `atlassian/autosysInsight.ts`.
+
+- **`autosys_run_stats`**: `runDurations` (successful runs; every finished run only when none succeeded, and says so),
+  `durationStats` (median as "typical", mean, min, max, p10/p90). Running now: `etaFor` - expected at start + median,
+  latest at start + p90, `overrun` past p90. Times through `localTime` with the zone named once (`localZone`).
+- **`autosys_usual_start`**: observed - `timeOfDayStats` over `ownStarts` (no retries; manual starts left out via
+  `classifyRuns` when event history exists), a circular mean then median and 10th/90th percentile offsets, so 23:55 and
+  00:05 average to midnight. From the definitions - `expectedStartFromDefinitions`: a job with start times starts at
+  its first one; a box member with its box; a condition-started job when the last of its `s`/`d` predecessors is
+  expected to finish (their start + median run time), recursively; minutes may exceed 1440 for a chain past midnight;
+  a missing link is named, never guessed.
+- **`autosys_predecessors`**: `tracePredecessors` - breadth-first over definitions (`condition` references and
+  `box_name`), every reference met or not, each job read once (`predecessorSource` caches definitions and statuses),
+  so diamonds and cycles end; limits `maxJobs` 200, `maxDepth` 30, and the cut is said. Another instance (`JOB^INS`) is
+  named, not followed. `describeTrace`: each job once in full, repeats pointing back, then the topmost jobs, failures
+  and every unmet wait. `eta: true` adds an ETA for predecessors running now.
+- **Not verified against a live AutoSys** - against a stand-in with a three-level chain (`autosysInsight.test.ts`).
+  Run history and event history come from `paths.runHistory` / `paths.eventHistory`; where a server has none, the
+  tools say so and which key to set.
+
+## 12bb. Skills and tools read in one go, suggestions while typing, definitions however shaped (VS Code 0.218.0, host 0.193.0, Fire Code 0.91.0, fire-fs 1.4.0)
+
+- **Loading skills and Python tools took 1.5 minutes at the office** from the bucket mirror folders ("please
+  leverage the power of rust"). The loaders read one file at a time (and both copies again for `sameFile` when a name
+  is in two folders), every turn, and each open waits on the machine's scanner. `library/snapshot.ts`:
+  `LibraryReader.snapshot(roots)` lists every folder and reads every wanted file at once - `fire-fs library`
+  (`library.rs`, rayon pool of 32, `*.md` and `*/SKILL.md` in skills folders, `*.py` and `.registry.json` in tools
+  folders, 4 MB cap) where the helper has it, else Node with 24 lanes - and keeps text by mtime+size, so a file not
+  changed since the last snapshot is not read again (`known` sent to the helper). `loadSkills` and `loadRegistries`
+  take a `LibraryFs` (default `diskLibraryFs`); anything outside the snapshot falls through to the disk, so what they
+  load is unchanged (`snapshot.test.ts` compares both, through the real helper too). An older helper ("Unknown
+  operation") switches to Node once. **Not measured at the office.**
+- **Suggestions while typing** (`composerCompletion`, user-scope personal setting, off; Settings → Appearance), asked
+  for with "Tab for one word, Ctrl+Space for the whole sentence". `agent/typeAhead.ts`: the prompt (typed text and the
+  last four user/assistant messages, never tool output) and `cleanSuggestion` (repeat removed, one line, 120 chars,
+  whole word). The bridge's `suggestCompletion` answers `requestCompletion` with `completion`; a newer request aborts
+  the last, 8 s cap, the stream stopped at the first newline, failures are silent. UI `completions.ts` (`completeWith`,
+  the `stagedFiles` pattern; only the newest request is answered) and the composer: 500 ms after typing stops, caret at
+  the end, 6+ characters, no picker open. Tab = `nextWord`, Ctrl+Space or Right arrow at the end = all, Esc hides;
+  `remainingSuggestion` keeps the rest while the typing matches it. **The grey text is drawn in a layer behind the
+  textarea** after a transparent copy of the text - the textarea's own text stays real, so the lesson from the
+  mention-highlight layer (hidden glyphs, misplaced caret) does not apply; a layer out of step only misplaces the grey.
+  `ComposerSuggestion.test.tsx`. **Not seen in a real webview.**
+- **AutoSys definitions however the server shapes them** (reported: dependencies empty for a job that has some).
+  `definitionCondition` / `definitionBox` (autosys.ts): any key spelling (case, `_`, `-` ignored, aliases), one nested
+  object, or a `condition:` / `box_name:` line in a JIL text field. Used by `autosys_dependencies` (both directions),
+  `autosys_usual_start`, and `tracePredecessors` through `PredecessorSource.condition`/`box`. A root job with no
+  condition, box or start time gets `noDependencyFieldsNote` - the field names the server returned - instead of a
+  silent "no dependencies". **The office server's actual shape is still unknown**; the note is there to show it.
+
+## 12bc. Decision models: D3 (VS Code 0.219.0-0.220.0, host 0.194.0-0.195.0, Fire Code 0.92.0-0.93.0, fire-fs 1.5.0)
+
+Asked for over several messages: D3 (vLLM Semantic Router's decision model - text, JSON and images in, calibrated
+probabilities for Choice / Yes-No / Score out) set up as an OpenAI-compatible provider profile; Agent team mode
+"powered by it when available" rather than a new mode; **everything only when a decision model is set up**; and,
+building it, "make sure we dont disturb any existing workings".
+
+- **`decision/decide.ts`**: `decide(model, question)` - one request through the one HttpClient (invariant 2), the
+  profile's own auth strategy kept beside the observers' (`observerStrategy`, so the chat's one-slot token cache is
+  never evicted). **D3's own API first** (learned from the vllm-sr/d3 model card and the vLLM recipe when the user said
+  "search about it internet"; the first build guessed chat completions, which D3 does not serve): `POST <base>/systemone`,
+  `{ model, state, questions: { q: { type: choice|noul|score, instructions, criteria } }, images }` ->
+  `structured_decision` with `answers.q.probabilities` per option (`noul` = probability of yes). `systemOneRequest`
+  gives choice options readable keys (`optionKeys`, mapped back to our ids) with their descriptions as `criteria`;
+  scores use `SCORE_LEVELS` (five named levels) and read the expected level as 0-1. `readSystemOne` also takes the
+  answer wrapped under `data`/`result` (a gateway). **`decisionModel.endpoint`** (the user: "endpoints may be
+  different in my office", "it will come under open ai compatible provider"): blank = `/systemone`, then on 404/405
+  chat completions, remembered per base URL (`CHAT_ONLY`); a path = D3's API there, no fallback; `chat` = chat
+  completions only. `decisionEndpointProblem` keeps it a path on the profile's base URL (never another host).
+  The chat-completions path: `temperature: 0`, `max_tokens: 32`, `logprobs: true, top_logprobs: 20` (dropped and
+  remembered per base URL when a gateway 4xx-es naming it), options lettered A-Z; `readDecision` takes probabilities
+  from JSON beside `choices` (a router's own fields), JSON in the reply (several shapes, see the file), or token
+  log-probabilities on the first answer token (both OpenAI shapes; "10" split over two tokens handled for scores).
+  **A bare answer is `ok: false`** - a threshold over a number nobody produced would be a guess presented as
+  calibrated. Never throws; 10 s cap.
+- **Config `decisionModel`** (`profileId`, `routing`, `routeThreshold` 0.75, `judgeLoops`, `loopThreshold` 0.8):
+  user-scope only (a repository naming it would choose who handles every message), shared with the Agents section.
+  Only OpenAI-wire profiles are offered or used.
+- **Agent team routing** (`decision/route.ts`, `routeMessage` in the bridge): a Choice between the main assistant
+  (`@main`, never a role id) and every available specialist, from the message and the last two chat messages. A pick at
+  the threshold reaches the main assistant **the way `#role` does** (`describeRoute` beside `describeDirectedRoles`):
+  consult it with `ask_agent` - so approvals, read-only roles and the specialist's own process are untouched; the
+  decision model chooses who and grants nothing. Skipped for `#role` messages, under a strategy, and scheduled runs.
+  `decisionRoute` -> `DecisionRouteNote` above the message box ("Sent to Tester · 0.91", **Answer it yourself** queues
+  an ordinary message); a failed decision posts a one-line note and routes nothing. The header says "decisions by
+  <label>" in Agent team (`settings.decisionLabel`).
+- **Strategy loops** (`judgeLoops`): after the judging role answers a two-way edge with an `until`, a Yes/No question
+  over the work handed in and the review. `loopVerdict`: met at the threshold, not met at its mirror, otherwise
+  undefined. `afterConsult` takes the verdicts as an optional last argument and uses `readVerdict` where there is none,
+  so without a decision model it is byte-for-byte the old behaviour.
+- **Audit**: an `ObservedEvent` kind `decision` (purpose, question, outcome, probabilities) on every call;
+  `read_audit_log` renders it. Rust's observer takes events as JSON values, so it needed nothing.
+- **Settings → Agents → Decision model** (`settings/DecisionModelSection.tsx`, self-contained over the transport):
+  only the profile picker until one is chosen; then the two switches with thresholds and **Test decision model**, which
+  asks a yes/no and a choice sample and shows the source, probabilities and the raw answer.
+- Tests: `decision/decide.test.ts` (every shape, the logprobs retry, routing rules, loop verdicts), the host's
+  `decisionModel.test.ts` (a loopback D3 answering with logprobs: routed, below threshold, **no decision model = no
+  request and an unchanged message**, no probabilities = note and no route, Test button),
+  `DecisionModelSection.test.tsx`. **Not verified against a real D3** - the first thing to do there is press Test.
+- **The rest of the design, built next ("please implement the pending ones too")**, each with its own switch under
+  `decisionModel` (on unless false) and nothing without a profile:
+  - **Anti Hallucinator first pass** (`decision/firstPass.ts`, `ObserverHub.toGuard`, `firstPass`/`firstPassThreshold`
+    0.85): at each step end (toolResult, assistant, turnEnd) a noul "grounded and on the request?". Sure: the event is
+    sent to the guard with `quiet: true` - kept in its context - and Rust's `due()` (observer.rs, fire-fs 1.5.0) does not
+    review on a quiet last event, so it is reviewed with the next step that needs it. Never skips sending; an older
+    helper ignores `quiet` and reviews as before. `decision` events are not sent to the guard. Kept in order by a chain.
+  - **Decision steps** (`StrategyNode.decides`, `decisionQuestion`; `branchChoice`; `chooseBranch` in the bridge): a
+    property on an ordinary step, not a new node kind, so nothing else in strategies changes. After that role answers,
+    a choice over its one-way outgoing edges (label = target, description = edge label); the main agent is told "go
+    there next", or to choose when unsure. `describeStrategy` adds a line only for such a step. Offered in the window
+    only when `strategies.decisionModel` is true (or the step already decides).
+  - **Hand-over scores** (`scoreHandOvers`, `decision/more.ts`): for each edge out of the role with a `contract`, a
+    score; below 0.4 the specialist is asked once more and the main agent told.
+  - **Role suggestions** (`suggestRoles`): Agent team, no strategy - asked alongside `consultAgentNow` (no waiting),
+    appended as advice when another role is at the route threshold. `turnModeId` records the turn's mode.
+  - **New topics** (`newTopics`): `applyPlan` also asks a noul when `startsNewWork` says no; it only adds fresh starts.
+  - **Monitoring triage** (`triageAlerts`): Fire Code's `maybe_notify` asks the executor `kind: 'triage'` (only when it
+    is already running) for an alert that got worse; `Pending::Triage` (20 s), then `announce` with
+    `monitor::triaged_mode`: >= 0.8 at least Urgent, <= 0.2 at most Silent but never for red; no answer = as set. The
+    notification says what it thought. The context carries the first ten alerts with their rows, read from the saved
+    check (`store.result`) only then - rows are never held in memory.
+  - **Skill and tool for each request** (asked for: "right skill to choose and right tool to choose", then "in any mode
+    if user enabled it" and "if it is selected under a chat, it should be carried to any new session in that chat"):
+    **a per-chat choice**, not a setting - `chatPicks: SkillToolPicks` (`skills` | `tools` | `both`; then asked for:
+    "choosing the right skill is enough at some times"), saved on the Task and the pending file (`skillToolPicks`),
+    restored by `adoptSteering`, kept by `startNewTask({ keepPicks })` from "+" and the handoff, and carried to a new
+    Fire Code tab with the strategy (`carryPicks` / `picks` on `useStrategy`, shell.js `deliverCarry` hands it over even
+    with no strategy). Header "Picks" select only with a decision model. The question is `withRecentChat` (the two
+    messages before, as routing has) so a follow-up has its context. Messages
+    `setChatSkillToolPicks`, `requestChatSkillToolPicks`, `chatSkillToolPicks`. Capped at 4 s (`SUGGEST_TIMEOUT_MS`)
+    before the reply. `suggestThreshold` 0.25 stays global. `suggestSkillsAndTools` asks two choice questions at once - non-`always` skills, and
+    the turn's tools minus the loop's control tools - each with `@nothing` as an option; picks at the threshold (at
+    most three) are appended to the request (`describeSuggestions`: the skill file to read; for a dispatch-only tool,
+    search_docs then call_tool). Advice in the message, never in the tool block or prefix (section 12); not for schedules.
+  - Handoff and compaction triggers were **not** given to it: they are about a measured token count, not a judgement.
+- **Found while testing this: specialists lost their context.** `agentBriefingTools` was set by every
+  `currentToolRegistry` call, and a dozen run for other reasons with the dispatcher off; a specialist's briefing then
+  differed between two questions of one turn, `roleProcessFor`'s key changed, and its process - and everything it had
+  been told - was replaced. It is now set only from the turn's `fullRegistry`. Caught by `strategyEndToEnd.test.ts`
+  (the Rust-process case) once the timing shifted; it was live in real use.
+- **The startup bar shortens paths** (`host/startupPaths.ts`, reported: long temp paths of the bucket folders took the
+  room above the message box): a path shows as its last two parts; the whole line is the hover (`full` on each
+  `startupProgress` entry) and the log keeps full paths.
+
+## 12bd. Consulting the organisation's web chat through Chrome (VS Code 0.222.0, host 0.197.0, Fire Code 0.95.0)
+
+Asked for: Gemini is offered at the office only in a web chat ("not as a coding assistant api or through open ai
+compatible provider"), so consult it through Chrome's MCP server - method 2 of three put to the user (drive the page;
+**replay the page's own backend request from inside the page**; ask for API access). Then, firmly: "it shouldnt go
+outside [the organisation] at any stage ... i dont want agent to go rougue to get gemini from outside office", "backend address it
+finds, user should approve it ... and only that backend address should be used", and "available only when chrome mcp is
+setup". `packages/core/src/webchat/`.
+
+- **The capture** (`capture.ts`, `inpage.ts` `watchScript`/`readCaptureScript`): a unique phrase; the page's fetch, XHR
+  and WebSocket.send are wrapped (in the page, via the MCP server's `evaluate_script`) to record the request whose body
+  holds it, with its reply. `candidatesFrom` refuses any request to another origin, turns the body into a template
+  (`QUESTION_PLACEHOLDER`, written in as JSON-escaped, form-encoded or raw), keeps credential headers **by name only**
+  (`splitHeaders` - values are taken from the page's latest request at ask time, never stored), and finds the answer
+  (`answer.ts`: longest text of a JSON reply, or the delta/cumulative text of server-sent events). Nothing is saved until
+  the user presses **Use this** on the shown backend address (`confirmWebChatCapture`). WebSocket chats are refused.
+- **The setup** is one file per Windows user (`<personalDir>/web-chat.json`), shared by every chat, codebase and host on
+  the machine; absent with `--server` (no personal folder), so the tool is too.
+- **The rules** (`guard.ts`), checked before every consultation and at capture: the Chrome server is a local command, not
+  a URL server, has `--no-usage-statistics` and `--no-performance-crux`, and attaches only to a
+  loopback Chrome; **npx is allowed** (the user: "npx downloads from internal artifactory of npm setup") only with a
+  pinned version (`isPinned`, never `@latest`); `npm config get registry` (run by the bridge, cached ten minutes) is
+  shown in the panel, not judged - other package runners are refused. The server's command line is read as the shell
+  reads it (`commandWords` over command + args joined), since the MCP form keeps one argument per line and arguments typed
+  on one line arrive as one string (reported: flags "already included" and still reported missing). **There is no address-range rule** (one refused hosts resolving to public IPs; removed at the user's request
+  because the office's internal sites resolve to a range that looks public - "the web chat is going to work only in the link I approve"):
+  the approved backend address is the boundary, and the page address only has to be http(s) (`webChatAddressProblem`); in the page, the request goes to the saved path on the page's own origin with `redirect: 'error'`, and a reply
+  whose `response.url` is elsewhere is refused (`askScript`, tested in a vm sandbox). **The agent never gets Chrome's
+  tools**: `McpRegistry.reserve` withholds a server from `enabledTools` (prompt and call_tool both), set in
+  `currentToolRegistry` before MCP tools are registered; Light Code calls it through `callServerTool`. **Only the server
+  chosen for the web chat** (`WebChatSetup.server`, chosen in the panel; asked for: "i dont want existing chrome mcp to be
+  disturbed") is reserved and checked - `webChatServer()`; any other Chrome server stays the assistant's, so with one the
+  assistant can still browse, behind approvals (the user chose this over reserving every Chrome server, told so). The
+  reserved server's ~30 tools are replaced by the one `ask_web_chat`, so the assistant's tool list shrinks.
+- **`ask_web_chat`** (`tool.ts`): `mcp` group, registered only while a Chrome DevTools server (`evaluate_script` + pages
+  tools) is connected; the preview is the exact text and the approved backend address (invariant 8); in
+  `NEVER_AVAILABLE_TO_SCHEDULES`. A signed-out page (401/403), a missing page credential, or an answer not where the capture
+  found it each produce a sentence saying what to do.
+- **Found while doing this: the Node host and Fire Code never had a personal folder.** `cli.ts` passed `personalDir`
+  to `startServer`, and neither `server.ts` nor `session.ts` declared or forwarded it (since the "only me" commit,
+  `1eb094c`), so "only me" skills and tools and the web chat panel were absent there. Forwarded now;
+  `apps/host/src/personalDir.test.ts` checks it on a running host. The bug shape §19 keeps recording.
+- **First real use failed** (reported: "evaluate_script: pageId: Invalid input: expected number, received undefined"):
+  chrome-devtools-mcp 1.x requires `pageId` on `evaluate_script` (older releases ran on the selected tab), and its
+  "## Pages" lines are `id: Title (url) [selected]` - the first parser took the title's first word as the address, so an
+  open tab was never found. `pagesIn`, `selectWebChatPage` (returns the tab id) and `runScript(…, pageId)` follow 1.13.0's
+  tool reference and source, still reading parameter names from each schema. **Verified against the real thing**:
+  `chromeReal.test.ts` (opt-in, `LC_CHROME_E2E=1`) runs `chrome-devtools-mcp@1.13.0` with headless Chrome against a
+  loopback stand-in chat whose page signs requests with a token - tab, capture with Send it for me, approval data, two
+  consultations, tab reused. It found a third fault: a reply *mentioning* the phrase was skipped as "the question", so the
+  reply's id was read as the answer (`findAnswer` now skips only text that is the phrase alone). A capture error that
+  repeats now ends the capture and is shown (it was only logged). **Not verified against the office's web chat.**
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -4462,6 +4981,17 @@ contained. The pane is the host's ordinary browser UI in an iframe, kept mounted
   whether or not Copilot exists. **IntelliJ/PyCharm debug sessions are deferred by the user** ("can be done
   later, but keep in your todolist"): Kotlin in `apps/intellij` reading `XDebuggerManager`, serving the same
   snapshot shape; no Gradle on the development machine, so it cannot be built or tested here.
+- **A stopped agent says why, and its log survives Restart** (Fire Code 0.79.0, host 0.181.0, reported: the
+  agent stopped often and `host.log` held only startup lines). `open_log` moves the last run to
+  `host.previous.log` on every start, so one Restart hid the crash and two erased it. On an unexpected exit
+  Fire Code copies the log to `crashes/host-<UTC stamp>.log` (newest ten, `host::keep_crash_log`), names the
+  exit code in words (`describe_exit`: OOM abort, access violation, killed from outside) and any Node report
+  from the last two minutes. The host, under `--control-stdin` only, sets `process.report.reportOnFatalError`
+  into `<data dir>/crash-reports` (the only account of a V8 out-of-memory death), logs node version and heap
+  limit at start, `[memory]` every ten minutes with a warning at 80% of the heap, and "exiting through Node
+  with code N" - its absence means a native crash or a kill. `crashDiagnostics.test.ts` runs a real OOM.
+  Skill issues are logged only when the list changes (a bucket sync reloaded and re-logged them every time).
+  **The office crash's cause is still unknown**; this exists so the next one names it.
 - Fire Code's version lives in `npm/package.json` and `native/Cargo.toml`; `build.mjs` refuses a mismatch
   (and 66).
 

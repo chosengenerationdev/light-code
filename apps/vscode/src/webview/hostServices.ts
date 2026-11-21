@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import * as path from 'node:path'
 import * as vscode from 'vscode'
-import { findFireCodeHelper, personalLibraryDir, sharedMachineApprovalsFile, Logger, mentionExcludeGlob, mentionGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
+import { findFireCodeHelper, personalLibraryDir, sharedMachineApprovalsFile, Logger, foldersOf, mentionExcludeGlob, mentionGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
 import { VSCodeConfigStore } from '../platform/config.js'
 import { createVSCodeDiagnostics } from '../platform/diagnostics.js'
 import { readDebugSession, startTrackingDebugSessions } from '../platform/debugSession.js'
@@ -59,6 +59,15 @@ export function createVSCodeHostServices(
       // so opening a second one does not silently replace the first in the same tab.
       const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath))
       await vscode.window.showTextDocument(document, { preview: false })
+    },
+
+    async openWithDefaultApp(filePath: string) {
+      // The Files panel: a workbook opens in Excel, a PDF in its reader - the program this machine uses.
+      await vscode.env.openExternal(vscode.Uri.file(filePath))
+    },
+
+    async revealInFolder(filePath: string) {
+      await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath))
     },
 
     async openWalkthrough() {
@@ -159,8 +168,8 @@ export function createVSCodeHostServices(
      * ended up in the picker. Passing `undefined` restores the editor's own handling, which is
      * what an emptied list should mean.
      */
-    // No sibling codebases in VS Code, so `root` never arrives here.
-    async findFiles(segment, limit, excludeFolders, mode, depth) {
+    // `root` is a folder the person typed (`@src/abc/`); VS Code has no sibling codebases.
+    async findFiles(segment, limit, excludeFolders, mode, depth, root) {
       /*
        * Compiled here, because this is the host whose index speaks glob.
        *
@@ -169,13 +178,20 @@ export function createVSCodeHostServices(
        * were real and both looked like the search failing rather than the pattern — see
        * `context/mentionGlob.ts`, which owns the compilation and records what was measured.
        */
-      const pattern = mentionGlob(segment, mode, depth)
+      const glob = mentionGlob(segment, mode, depth)
+      const pattern = root === undefined ? glob : new vscode.RelativePattern(vscode.Uri.file(root), glob)
       const exclude = mentionExcludeGlob(excludeFolders)
+      // Folders: the index knows only files, so ask for files under matching folders - more of them,
+      // since one big folder would otherwise use the whole allowance - and recover the folders.
+      const asked = mode === 'folders' ? Math.max(limit, 2000) : limit
       const found =
         exclude === undefined
-          ? await vscode.workspace.findFiles(pattern, undefined, limit)
-          : await vscode.workspace.findFiles(pattern, exclude, limit)
-      return found.map((uri) => uri.fsPath)
+          ? await vscode.workspace.findFiles(pattern, undefined, asked)
+          : await vscode.workspace.findFiles(pattern, exclude, asked)
+      const paths = found.map((uri) => uri.fsPath)
+      if (mode !== 'folders') return paths
+      const searched = root ?? workspaceRoot
+      return searched === undefined ? [] : foldersOf(paths, segment, searched, path.sep).slice(0, limit)
     },
   }
 

@@ -4,6 +4,23 @@ import { describeProxyEnvironment, proxyForUrl } from './proxy.js'
 import { buildConnectOptions } from './tls.js'
 
 /**
+ * How long a connection (TCP and TLS, through any proxy) may take to come up.
+ *
+ * undici's own default is 10 seconds, and Node's `https` - what most other clients use, Roo Code's
+ * among them - has none at all. Reported: on a day the office network was slow, every request from
+ * Light Code and Fire Code failed while Roo Code talked to the same gateway as if nothing was wrong.
+ * A slow handshake through an inspecting proxy is not a dead host; a minute still ends a truly
+ * unreachable one, and the failure is then retried (`agent/transient.ts`).
+ */
+export const CONNECT_TIMEOUT_MS = 60_000
+
+/**
+ * How long one address is tried before the next is (Happy Eyeballs). Node's default is 250 ms, which
+ * a slow link exceeds on every address, abandoning each attempt that would have succeeded.
+ */
+const FAMILY_ATTEMPT_MS = 1_000
+
+/**
  * Client TLS material for mutual-TLS gateways. Buffers, not paths — reading and
  * validating the files is `providers/auth/certs.ts`'s job, so this layer never touches
  * the filesystem and the cert deny list (invariant 6) has a single enforcement point.
@@ -176,7 +193,10 @@ export class FetchHttpClient implements HttpClient {
         // Happy Eyeballs. Without it a host whose AAAA record is black-holed — ordinary on a
         // corporate network with partial IPv6 — hangs instead of falling back to IPv4.
         autoSelectFamily: true,
+        autoSelectFamilyAttemptTimeout: FAMILY_ATTEMPT_MS,
+        timeout: CONNECT_TIMEOUT_MS,
       },
+      proxyTls: { timeout: CONNECT_TIMEOUT_MS },
     })
     this.proxyAgents.set(key, agent)
     return agent
@@ -196,6 +216,8 @@ export class FetchHttpClient implements HttpClient {
         // Happy Eyeballs, for the same reason as the proxy path: a black-holed AAAA record is a
         // hang rather than an error, and every other client on the machine falls back.
         autoSelectFamily: true,
+        autoSelectFamilyAttemptTimeout: FAMILY_ATTEMPT_MS,
+        timeout: CONNECT_TIMEOUT_MS,
       },
     })
     this.agents.set(key, agent)

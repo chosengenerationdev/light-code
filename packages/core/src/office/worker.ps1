@@ -1218,6 +1218,662 @@ function Invoke-ExcelSheets {
     }
 }
 
+<#
+  Charts and pivot tables over data already in a workbook.
+
+  ## Names cross the boundary, never numbers
+
+  The tool offers chart types and summary functions by name and they are mapped to Excel's
+  constants here. A number from the model would be a constant nobody can read in the approval
+  prompt, and a wrong one draws a different chart without saying so.
+
+  ## Nothing here saves, and a failed create takes its half-made object with it
+
+  Like every other write in this file the workbook is left dirty, so closing without saving is the
+  undo. A request is retried whole when Excel is busy (see the loop at the bottom), so a create
+  that fails part-way removes the chart, pivot table or sheet it had already made: otherwise the
+  retry would leave two.
+#>
+$script:ChartTypes = @{
+    'column' = 51; 'stackedColumn' = 52; 'stackedColumn100' = 53
+    'bar' = 57; 'stackedBar' = 58; 'stackedBar100' = 59
+    'line' = 4; 'lineMarkers' = 65; 'stackedLine' = 63
+    'pie' = 5; 'doughnut' = -4120
+    'area' = 1; 'stackedArea' = 76
+    'scatter' = -4169; 'scatterLines' = 74; 'scatterSmooth' = 72
+    'bubble' = 15; 'radar' = -4151; 'radarFilled' = 82
+    'histogram' = 118; 'pareto' = 122; 'waterfall' = 119; 'treemap' = 117
+    'sunburst' = 120; 'boxWhisker' = 121; 'funnel' = 123
+}
+
+# Summary functions (XlConsolidationFunction) and "show values as" (XlPivotFieldCalculation).
+$script:PivotFunctions = @{
+    'sum' = -4157; 'count' = -4112; 'average' = -4106; 'max' = -4136; 'min' = -4139
+    'product' = -4149; 'countNumbers' = -4113; 'stdDev' = -4155; 'var' = -4164
+}
+$script:PivotShowAs = @{ 'normal' = -4143; 'percentOfTotal' = 8; 'percentOfRow' = 6; 'percentOfColumn' = 7 }
+
+function Get-ChartTypeCode {
+    param([string]$Name)
+
+    if (-not $script:ChartTypes.ContainsKey($Name)) {
+        throw "Unknown chart type '$Name'. Use one of: $(($script:ChartTypes.Keys | Sort-Object) -join ', ')."
+    }
+    return [int]$script:ChartTypes[$Name]
+}
+
+function Get-ChartTypeName {
+    param($Code)
+
+    foreach ($key in $script:ChartTypes.Keys) {
+        if ([int]$script:ChartTypes[$key] -eq [int]$Code) { return $key }
+    }
+    # xlCombination: a chart whose series were given different types.
+    if ([int]$Code -eq -4111) { return 'combo' }
+    return "excel type $Code"
+}
+
+<#
+  The block of data a chart or pivot table is made from.
+
+  A named range wins. Without one it is the block around the top-left of the used range - the
+  CurrentRegion - rather than UsedRange itself, which also counts cells that were formatted once
+  and are empty now, and a pivot table over a trailing empty column refuses to be made.
+  The approval preview asks this same function, so what is shown is what will be used.
+#>
+function Get-DataRange {
+    param($Sheet, [string]$Address)
+
+    if (-not [string]::IsNullOrWhiteSpace($Address)) {
+        # The comma matters: a Range is enumerable, and a function returning one bare hands back its cells.
+        try { return ,$Sheet.Range($Address) }
+        catch { throw "'$Address' is not a range Excel recognises on the sheet '$($Sheet.Name)'. Give it as A1:D20, without the sheet name." }
+    }
+    $used = $Sheet.UsedRange
+    $first = $used.Cells.Item(1, 1)
+    if ([int]$used.Rows.Count -eq 1 -and [int]$used.Columns.Count -eq 1 -and [string]::IsNullOrWhiteSpace([string]$first.Text)) {
+        throw "The sheet '$($Sheet.Name)' has no data. Name the sheet that holds it, or the range."
+    }
+    return ,$first.CurrentRegion
+}
+
+# The first row of each area, as displayed. Capped, because a range can be thousands wide.
+function Get-RangeHeaders {
+    param($Range)
+
+    $headers = @()
+    for ($a = 1; $a -le $Range.Areas.Count; $a++) {
+        $area = $Range.Areas.Item($a)
+        $count = [Math]::Min([int]$area.Columns.Count, 200)
+        for ($c = 1; $c -le $count; $c++) { $headers += [string]$area.Cells.Item(1, $c).Text }
+    }
+    return ,$headers
+}
+
+function Invoke-ExcelRangeShape {
+    param($Request)
+
+    $app = Get-OfficeApp -ProgId 'Excel.Application' -AttachOnly $true
+    $wb = Get-Workbook -App $app -Name $Request.workbook
+    $sheet = Get-Worksheet -Workbook $wb -Name $Request.sheet
+    $range = Get-DataRange -Sheet $sheet -Address $Request.range
+    $columns = 0
+    for ($a = 1; $a -le $range.Areas.Count; $a++) { $columns += [int]$range.Areas.Item($a).Columns.Count }
+    return @{
+        workbook = $wb.Name
+        sheet    = $sheet.Name
+        address  = $range.Address($false, $false)
+        rows     = [int]$range.Areas.Item(1).Rows.Count
+        columns  = $columns
+        areas    = [int]$range.Areas.Count
+        headers  = (Get-RangeHeaders -Range $range)
+        sheets   = @(Get-SheetNames -Workbook $wb)
+    }
+}
+
+# A sheet by name, or $null. Get-Worksheet throws, which is right for a source and wrong for a
+# destination that may be about to be created.
+function Find-SheetOrNull {
+    param($Workbook, [string]$Name)
+
+    foreach ($ws in $Workbook.Worksheets) { if ($ws.Name -eq $Name) { return $ws } }
+    return $null
+}
+
+# A new sheet at the end, named as asked, made unique and kept to Excel's 31 characters.
+function Add-NamedSheet {
+    param($Workbook, [string]$Name)
+
+    $base = $Name
+    if ($base.Length -gt 31) { $base = $base.Substring(0, 31) }
+    $candidate = $base
+    $n = 2
+    while ($null -ne (Find-SheetOrNull -Workbook $Workbook -Name $candidate)) {
+        $suffix = " ($n)"
+        $candidate = $base.Substring(0, [Math]::Min($base.Length, 31 - $suffix.Length)) + $suffix
+        $n++
+    }
+    $sheet = $Workbook.Worksheets.Add([System.Reflection.Missing]::Value, $Workbook.Worksheets.Item($Workbook.Worksheets.Count))
+    $sheet.Name = $candidate
+    return $sheet
+}
+
+# A cell just right of whatever a sheet already holds, so a new object never covers data.
+function Get-FreeAnchor {
+    param($Sheet, [int]$Gap)
+
+    $used = $Sheet.UsedRange
+    if ([int]$used.Rows.Count -eq 1 -and [int]$used.Columns.Count -eq 1 -and [string]::IsNullOrWhiteSpace([string]$used.Cells.Item(1, 1).Text)) {
+        return ,$Sheet.Range('A3')
+    }
+    return ,$Sheet.Cells.Item([int]$used.Row, [int]$used.Column + [int]$used.Columns.Count + $Gap)
+}
+
+function Find-ChartObject {
+    param($Workbook, [string]$Name)
+
+    if ([string]::IsNullOrWhiteSpace($Name)) { throw 'No chart name was given. Use action "list" to see the charts.' }
+    $known = @()
+    foreach ($ws in $Workbook.Worksheets) {
+        $objects = $ws.ChartObjects()
+        for ($i = 1; $i -le $objects.Count; $i++) {
+            $co = $objects.Item($i)
+            if ($co.Name -eq $Name) { return @{ object = $co; sheet = $ws } }
+            $known += "$($ws.Name)!$($co.Name)"
+        }
+    }
+    if ($known.Count -eq 0) { throw "There are no charts in $($Workbook.Name)." }
+    throw "No chart named '$Name' in $($Workbook.Name). Charts: $($known -join ', ')."
+}
+
+<#
+  A chart as it actually is, read back after any change.
+
+  Each series' SERIES formula is included because it is the ground truth of what is plotted -
+  which cells are the name, the categories and the values - and a chart that looks right with
+  the wrong column behind it is the mistake a picture does not show.
+#>
+function Get-ChartSummary {
+    param($ChartObject, $Sheet)
+
+    $chart = $ChartObject.Chart
+    $summary = [ordered]@{
+        name  = [string]$ChartObject.Name
+        sheet = [string]$Sheet.Name
+        at    = [string]$ChartObject.TopLeftCell.Address($false, $false)
+        to    = [string]$ChartObject.BottomRightCell.Address($false, $false)
+    }
+    try { $summary.type = Get-ChartTypeName -Code ([int]$chart.ChartType) } catch { $summary.type = 'unknown' }
+    try { if ([bool]$chart.HasTitle) { $summary.title = [string]$chart.ChartTitle.Text } } catch { }
+    try { if ($null -ne $chart.PivotLayout) { $summary.pivot = $true } } catch { }
+    $series = @()
+    try {
+        $all = $chart.SeriesCollection()
+        for ($i = 1; $i -le $all.Count; $i++) {
+            $s = $all.Item($i)
+            $entry = [ordered]@{ name = [string]$s.Name }
+            try { $entry.formula = [string]$s.Formula } catch { }
+            try { $entry.type = Get-ChartTypeName -Code ([int]$s.ChartType) } catch { }
+            try { if ([int]$s.AxisGroup -eq 2) { $entry.secondaryAxis = $true } } catch { }
+            $series += $entry
+        }
+    } catch { }
+    $summary.series = $series
+    return $summary
+}
+
+<#
+  Everything about a chart's look that a request can set, for create and update alike.
+
+  Returns notes rather than throwing for what a chart type simply does not have - a pie has no
+  axes to title - because refusing the whole chart over a missing axis title is worse than
+  drawing it and saying so. A named series that does not exist does throw: that is a wrong
+  instruction, not a property the chart lacks.
+#>
+function Set-ChartOptions {
+    param($Chart, $Request)
+
+    $notes = @()
+    if ($null -ne $Request.title) {
+        $title = [string]$Request.title
+        if ($title -eq '') { $Chart.HasTitle = $false }
+        else { $Chart.HasTitle = $true; $Chart.ChartTitle.Text = $title }
+    }
+    foreach ($axis in @(@{ key = 'xAxisTitle'; kind = 1; label = 'category (x)' }, @{ key = 'yAxisTitle'; kind = 2; label = 'value (y)' })) {
+        $value = $Request.($axis.key)
+        if ($null -eq $value) { continue }
+        try {
+            $ax = $Chart.Axes($axis.kind)
+            if ([string]$value -eq '') { $ax.HasTitle = $false }
+            else { $ax.HasTitle = $true; $ax.AxisTitle.Text = [string]$value }
+        } catch {
+            $notes += "This kind of chart has no $($axis.label) axis, so that title was not set."
+        }
+    }
+    if ($null -ne $Request.valueFormat) {
+        try { $Chart.Axes(2).TickLabels.NumberFormat = [string]$Request.valueFormat }
+        catch { $notes += 'This kind of chart has no value axis, so the number format was not set.' }
+    }
+    if ($null -ne $Request.legend) {
+        $where = [string]$Request.legend
+        if ($where -eq 'none') { $Chart.HasLegend = $false }
+        else {
+            $Chart.HasLegend = $true
+            $positions = @{ 'bottom' = -4107; 'top' = -4160; 'right' = -4152; 'left' = -4131 }
+            if ($positions.ContainsKey($where)) { $Chart.Legend.Position = $positions[$where] }
+        }
+    }
+    if ($null -ne $Request.series) {
+        $all = $Chart.SeriesCollection()
+        foreach ($wanted in @($Request.series)) {
+            if ($null -eq $wanted) { continue }
+            $match = $null
+            $names = @()
+            for ($i = 1; $i -le $all.Count; $i++) {
+                $names += [string]$all.Item($i).Name
+                if ([string]$all.Item($i).Name -eq [string]$wanted.name) { $match = $all.Item($i) }
+            }
+            if ($null -eq $match) { throw "The chart has no series called '$($wanted.name)'. Its series: $($names -join ', ')." }
+            if ($null -ne $wanted.type) { $match.ChartType = Get-ChartTypeCode -Name ([string]$wanted.type) }
+            if ($null -ne $wanted.secondaryAxis) {
+                if ([bool]$wanted.secondaryAxis) { $match.AxisGroup = 2 } else { $match.AxisGroup = 1 }
+            }
+        }
+    }
+    if ($null -ne $Request.dataLabels) {
+        $all = $Chart.SeriesCollection()
+        for ($i = 1; $i -le $all.Count; $i++) { $all.Item($i).HasDataLabels = [bool]$Request.dataLabels }
+    }
+    if ($null -ne $Request.style) {
+        try { $Chart.ChartStyle = [int]$Request.style }
+        catch { $notes += "Style $($Request.style) does not exist for this chart, so the style was left as it was." }
+    }
+    return ,$notes
+}
+
+function Set-ChartSource {
+    param($Chart, $Source, [string]$SeriesIn)
+
+    if ($SeriesIn -eq 'rows') { $Chart.SetSourceData($Source, 1) | Out-Null }
+    elseif ($SeriesIn -eq 'columns') { $Chart.SetSourceData($Source, 2) | Out-Null }
+    else { $Chart.SetSourceData($Source) | Out-Null }
+}
+
+function New-ExcelChart {
+    param($App, $Workbook, $Request)
+
+    $type = Get-ChartTypeCode -Name ([string]$Request.type)
+    $dataSheet = Get-Worksheet -Workbook $Workbook -Name $Request.sheet
+    $source = Get-DataRange -Sheet $dataSheet -Address $Request.range
+
+    $name = [string]$Request.name
+    if ($name -ne '') {
+        foreach ($ws in $Workbook.Worksheets) {
+            $objects = $ws.ChartObjects()
+            for ($i = 1; $i -le $objects.Count; $i++) {
+                if ($objects.Item($i).Name -eq $name) { throw "There is already a chart called '$name' on '$($ws.Name)'. Pick another name, or update that one." }
+            }
+        }
+    }
+
+    $target = $dataSheet
+    $addedSheet = $false
+    $chartObject = $null
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($Request.placeOn)) {
+            $target = Find-SheetOrNull -Workbook $Workbook -Name ([string]$Request.placeOn)
+            if ($null -eq $target) {
+                $target = Add-NamedSheet -Workbook $Workbook -Name ([string]$Request.placeOn)
+                $addedSheet = $true
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($Request.at)) { $anchor = $target.Range([string]$Request.at).Cells.Item(1, 1) }
+        elseif ($addedSheet) { $anchor = $target.Range('B2') }
+        else { $anchor = Get-FreeAnchor -Sheet $target -Gap 1 }
+
+        $width = 480.0
+        $height = 288.0
+        if ($null -ne $Request.width) { $width = [double]$Request.width }
+        if ($null -ne $Request.height) { $height = [double]$Request.height }
+
+        try {
+            $shape = $target.Shapes.AddChart2(-1, $type, [double]$anchor.Left, [double]$anchor.Top, $width, $height)
+            $chartObject = $target.ChartObjects($shape.Name)
+        } catch {
+            # AddChart2 is Excel 2013 and later; the newer chart types are 2016 and later.
+            if ($type -ge 117) { throw "This Excel cannot draw a $($Request.type) chart - that needs Excel 2016 or later. Try column, bar or line." }
+            $chartObject = $target.ChartObjects().Add([double]$anchor.Left, [double]$anchor.Top, $width, $height)
+            $chartObject.Chart.ChartType = $type
+        }
+        $chart = $chartObject.Chart
+        Set-ChartSource -Chart $chart -Source $source -SeriesIn ([string]$Request.seriesIn)
+        if ($name -ne '') { $chartObject.Name = $name }
+        $notes = Set-ChartOptions -Chart $chart -Request $Request
+    } catch {
+        if ($null -ne $chartObject) { try { $chartObject.Delete() | Out-Null } catch { } }
+        if ($addedSheet) { try { Invoke-WithoutAlerts -App $App -Action { $target.Delete() } | Out-Null } catch { } }
+        throw
+    }
+
+    return @{
+        workbook   = $Workbook.Name
+        source     = "$($dataSheet.Name)!$($source.Address($false, $false))"
+        chart      = (Get-ChartSummary -ChartObject $chartObject -Sheet $target)
+        addedSheet = $(if ($addedSheet) { [string]$target.Name } else { $null })
+        notes      = $notes
+        saved      = [bool]$Workbook.Saved
+    }
+}
+
+function Invoke-ExcelChart {
+    param($Request)
+
+    $app = Get-OfficeApp -ProgId 'Excel.Application' -AttachOnly $true
+    $wb = Get-Workbook -App $app -Name $Request.workbook
+    $action = [string]$Request.action
+
+    if ($action -eq 'list') {
+        $charts = @()
+        foreach ($ws in $wb.Worksheets) {
+            if (-not [string]::IsNullOrWhiteSpace($Request.sheet) -and $ws.Name -ne [string]$Request.sheet) { continue }
+            $objects = $ws.ChartObjects()
+            for ($i = 1; $i -le $objects.Count; $i++) { $charts += Get-ChartSummary -ChartObject $objects.Item($i) -Sheet $ws }
+        }
+        $chartSheets = @()
+        foreach ($c in $wb.Charts) { $chartSheets += [string]$c.Name }
+        return @{ workbook = $wb.Name; charts = $charts; chartSheets = $chartSheets }
+    }
+
+    if ($action -eq 'create') { return New-ExcelChart -App $app -Workbook $wb -Request $Request }
+
+    $found = Find-ChartObject -Workbook $wb -Name ([string]$Request.name)
+
+    if ($action -eq 'update') {
+        $chart = $found.object.Chart
+        if (-not [string]::IsNullOrWhiteSpace($Request.type)) { $chart.ChartType = Get-ChartTypeCode -Name ([string]$Request.type) }
+        if (-not [string]::IsNullOrWhiteSpace($Request.range)) {
+            $dataSheet = $found.sheet
+            if (-not [string]::IsNullOrWhiteSpace($Request.sheet)) { $dataSheet = Get-Worksheet -Workbook $wb -Name $Request.sheet }
+            Set-ChartSource -Chart $chart -Source (Get-DataRange -Sheet $dataSheet -Address $Request.range) -SeriesIn ([string]$Request.seriesIn)
+        }
+        if ($null -ne $Request.width) { $found.object.Width = [double]$Request.width }
+        if ($null -ne $Request.height) { $found.object.Height = [double]$Request.height }
+        if (-not [string]::IsNullOrWhiteSpace($Request.at)) {
+            $cell = $found.sheet.Range([string]$Request.at).Cells.Item(1, 1)
+            $found.object.Left = [double]$cell.Left
+            $found.object.Top = [double]$cell.Top
+        }
+        if (-not [string]::IsNullOrWhiteSpace($Request.newName)) { $found.object.Name = [string]$Request.newName }
+        $notes = Set-ChartOptions -Chart $chart -Request $Request
+        return @{
+            workbook = $wb.Name
+            chart    = (Get-ChartSummary -ChartObject $found.object -Sheet $found.sheet)
+            notes    = $notes
+            saved    = [bool]$wb.Saved
+        }
+    }
+
+    if ($action -eq 'delete') {
+        $summary = Get-ChartSummary -ChartObject $found.object -Sheet $found.sheet
+        $found.object.Delete() | Out-Null
+        return @{ workbook = $wb.Name; deleted = $summary; saved = [bool]$wb.Saved }
+    }
+
+    if ($action -eq 'picture') {
+        # A temporary PNG the host reads and removes, so the model can see what it drew.
+        $file = Join-Path ([IO.Path]::GetTempPath()) ('light-code-chart-' + [guid]::NewGuid().ToString('N') + '.png')
+        $found.object.Chart.Export($file, 'PNG') | Out-Null
+        if (-not (Test-Path -LiteralPath $file)) { throw "Excel could not export '$($found.object.Name)' as a picture." }
+        return @{ workbook = $wb.Name; file = $file; chart = (Get-ChartSummary -ChartObject $found.object -Sheet $found.sheet) }
+    }
+
+    throw "Unknown chart action '$action'. Use list, create, update, delete or picture."
+}
+
+function Find-PivotTable {
+    param($Workbook, [string]$Name)
+
+    if ([string]::IsNullOrWhiteSpace($Name)) { throw 'No pivot table name was given. Use action "list" to see them.' }
+    $known = @()
+    foreach ($ws in $Workbook.Worksheets) {
+        $tables = $ws.PivotTables()
+        for ($i = 1; $i -le $tables.Count; $i++) {
+            $pt = $tables.Item($i)
+            if ($pt.Name -eq $Name) { return @{ table = $pt; sheet = $ws } }
+            $known += "$($ws.Name)!$($pt.Name)"
+        }
+    }
+    if ($known.Count -eq 0) { throw "There are no pivot tables in $($Workbook.Name)." }
+    throw "No pivot table named '$Name' in $($Workbook.Name). Pivot tables: $($known -join ', ')."
+}
+
+# Names from one of a pivot table's field collections, empty when it has none.
+function Get-PivotFieldNames {
+    param($Table, [string]$Which)
+
+    $names = @()
+    try {
+        # Called as methods: read as properties ($Table.$Which) they come back empty over COM.
+        if ($Which -eq 'RowFields') { $fields = $Table.RowFields() }
+        elseif ($Which -eq 'ColumnFields') { $fields = $Table.ColumnFields() }
+        elseif ($Which -eq 'DataFields') { $fields = $Table.DataFields() }
+        else { $fields = $Table.PageFields() }
+        for ($i = 1; $i -le $fields.Count; $i++) { $names += [string]$fields.Item($i).Name }
+    } catch { }
+    return ,$names
+}
+
+function Get-PivotSummary {
+    param($Table, $Sheet)
+
+    return [ordered]@{
+        name     = [string]$Table.Name
+        sheet    = [string]$Sheet.Name
+        location = [string]$Table.TableRange2.Address($false, $false)
+        source   = [string]$Table.SourceData
+        rows     = (Get-PivotFieldNames -Table $Table -Which 'RowFields')
+        columns  = (Get-PivotFieldNames -Table $Table -Which 'ColumnFields')
+        values   = (Get-PivotFieldNames -Table $Table -Which 'DataFields')
+        filters  = (Get-PivotFieldNames -Table $Table -Which 'PageFields')
+    }
+}
+
+# A pivot table's body as displayed, bounded, so the model can report the numbers it made.
+function Read-RangeText {
+    param($Range, [int]$MaxRows, [int]$MaxColumns)
+
+    $rowCount = [int]$Range.Rows.Count
+    $columnCount = [int]$Range.Columns.Count
+    $rows = [Math]::Min($rowCount, $MaxRows)
+    $columns = [Math]::Min($columnCount, $MaxColumns)
+    $out = @()
+    for ($r = 1; $r -le $rows; $r++) {
+        $line = @()
+        for ($c = 1; $c -le $columns; $c++) { $line += [string]$Range.Cells.Item($r, $c).Text }
+        $out += ,$line
+    }
+    return @{ rows = $out; totalRows = $rowCount; totalColumns = $columnCount }
+}
+
+function Resolve-PivotField {
+    param($Headers, [string]$Name)
+
+    foreach ($h in $Headers) { if ($h -eq $Name) { return $h } }
+    throw "The data has no column called '$Name'. Its columns: $($Headers -join ', ')."
+}
+
+function New-ExcelPivot {
+    param($App, $Workbook, $Request)
+
+    $sourceSheet = Get-Worksheet -Workbook $Workbook -Name $Request.sheet
+    $source = Get-DataRange -Sheet $sourceSheet -Address $Request.range
+    if ([int]$source.Areas.Count -gt 1) { throw 'A pivot table is made from one block of data, not several ranges.' }
+    if ([int]$source.Rows.Count -lt 2) { throw 'A pivot table needs a header row and at least one row of data.' }
+
+    $headers = Get-RangeHeaders -Range $source
+    for ($i = 0; $i -lt $headers.Count; $i++) {
+        if ([string]::IsNullOrWhiteSpace($headers[$i])) {
+            $cell = $source.Cells.Item(1, $i + 1).Address($false, $false)
+            throw "The data's column $($i + 1) (header cell $cell) has no heading. Every column a pivot table reads needs one."
+        }
+    }
+
+    # Every field is checked before anything is created, so a typo costs nothing.
+    $rows = @(); $columns = @(); $filters = @(); $values = @()
+    foreach ($f in @($Request.rows)) { if ($null -ne $f) { $rows += Resolve-PivotField -Headers $headers -Name ([string]$f) } }
+    foreach ($f in @($Request.columns)) { if ($null -ne $f) { $columns += Resolve-PivotField -Headers $headers -Name ([string]$f) } }
+    foreach ($f in @($Request.filters)) { if ($null -ne $f) { $filters += Resolve-PivotField -Headers $headers -Name ([string]$f) } }
+    foreach ($v in @($Request.values)) {
+        if ($null -eq $v) { continue }
+        $fn = 'sum'
+        if (-not [string]::IsNullOrWhiteSpace($v.summarize)) { $fn = [string]$v.summarize }
+        if (-not $script:PivotFunctions.ContainsKey($fn)) { throw "Unknown summary '$fn'. Use one of: $(($script:PivotFunctions.Keys | Sort-Object) -join ', ')." }
+        $showAs = 'normal'
+        if (-not [string]::IsNullOrWhiteSpace($v.showAs)) { $showAs = [string]$v.showAs }
+        if (-not $script:PivotShowAs.ContainsKey($showAs)) { throw "Unknown 'show as' '$showAs'. Use one of: $(($script:PivotShowAs.Keys | Sort-Object) -join ', ')." }
+        $values += @{ field = (Resolve-PivotField -Headers $headers -Name ([string]$v.field)); fn = $fn; showAs = $showAs; caption = [string]$v.caption; numberFormat = [string]$v.numberFormat }
+    }
+    if ($rows.Count + $columns.Count + $values.Count -eq 0) { throw 'Name at least one column to put in rows, columns or values.' }
+
+    $name = [string]$Request.name
+    if ($name -ne '') {
+        foreach ($ws in $Workbook.Worksheets) {
+            $tables = $ws.PivotTables()
+            for ($i = 1; $i -le $tables.Count; $i++) {
+                if ($tables.Item($i).Name -eq $name) { throw "There is already a pivot table called '$name' on '$($ws.Name)'." }
+            }
+        }
+    }
+
+    $target = $null
+    $addedSheet = $false
+    $table = $null
+    $chartName = $null
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($Request.placeOn)) { $target = Find-SheetOrNull -Workbook $Workbook -Name ([string]$Request.placeOn) }
+        if ($null -eq $target) {
+            $sheetName = [string]$Request.placeOn
+            if ([string]::IsNullOrWhiteSpace($sheetName)) { $sheetName = "Pivot of $($sourceSheet.Name)" }
+            $target = Add-NamedSheet -Workbook $Workbook -Name $sheetName
+            $addedSheet = $true
+        }
+        if (-not [string]::IsNullOrWhiteSpace($Request.at)) { $destination = $target.Range([string]$Request.at).Cells.Item(1, 1) }
+        elseif ($addedSheet) { $destination = $target.Range('A3') }
+        else { $destination = Get-FreeAnchor -Sheet $target -Gap 2 }
+
+        # As an R1C1 string with the sheet quoted: the form PivotCaches.Create documents, and the
+        # one that survives a sheet name with spaces or an apostrophe.
+        $sourceRef = "'" + $sourceSheet.Name.Replace("'", "''") + "'!" + $source.Address($true, $true, -4150)
+        $cache = $Workbook.PivotCaches().Create(1, $sourceRef)
+        if ($name -ne '') { $table = $cache.CreatePivotTable($destination, $name) }
+        else { $table = $cache.CreatePivotTable($destination) }
+
+        $table.ManualUpdate = $true
+        $position = 1
+        foreach ($f in $rows) { $field = $table.PivotFields($f); $field.Orientation = 1; $field.Position = $position; $position++ }
+        $position = 1
+        foreach ($f in $columns) { $field = $table.PivotFields($f); $field.Orientation = 2; $field.Position = $position; $position++ }
+        $position = 1
+        foreach ($f in $filters) { $field = $table.PivotFields($f); $field.Orientation = 3; $field.Position = $position; $position++ }
+        foreach ($v in $values) {
+            $dataField = $table.AddDataField($table.PivotFields($v.field), [System.Reflection.Missing]::Value, [int]$script:PivotFunctions[$v.fn])
+            if ($v.caption -ne '') {
+                # A caption may not equal a source column's name; Excel's own workaround is a space.
+                $caption = $v.caption
+                foreach ($h in $headers) { if ($h -eq $caption) { $caption = "$caption " } }
+                $dataField.Caption = $caption
+            }
+            if ($v.numberFormat -ne '') { $dataField.NumberFormat = $v.numberFormat }
+            if ($v.showAs -ne 'normal') { $dataField.Calculation = [int]$script:PivotShowAs[$v.showAs] }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($Request.layout)) {
+            $layouts = @{ 'compact' = 0; 'tabular' = 1; 'outline' = 2 }
+            if (-not $layouts.ContainsKey([string]$Request.layout)) { throw "Unknown layout '$($Request.layout)'. Use compact, tabular or outline." }
+            $table.RowAxisLayout([int]$layouts[[string]$Request.layout]) | Out-Null
+        }
+        # The total row at the bottom is Excel's ColumnGrand; the total column on the right is RowGrand.
+        if ($null -ne $Request.grandTotalRow) { $table.ColumnGrand = [bool]$Request.grandTotalRow }
+        if ($null -ne $Request.grandTotalColumn) { $table.RowGrand = [bool]$Request.grandTotalColumn }
+        $table.ManualUpdate = $false
+
+        if (-not [string]::IsNullOrWhiteSpace($Request.chartType)) {
+            $code = Get-ChartTypeCode -Name ([string]$Request.chartType)
+            $around = $table.TableRange2
+            $shape = $target.Shapes.AddChart2(-1, $code, [double]$around.Left + [double]$around.Width + 20, [double]$around.Top, 480.0, 288.0)
+            # A chart whose source is a pivot table becomes a pivot chart, following its filters.
+            $shape.Chart.SetSourceData($table.TableRange1) | Out-Null
+            $chartName = [string]$shape.Name
+        }
+    } catch {
+        if ($null -ne $table) { try { $table.TableRange2.Clear() | Out-Null } catch { } }
+        if ($addedSheet -and $null -ne $target) { try { Invoke-WithoutAlerts -App $App -Action { $target.Delete() } | Out-Null } catch { } }
+        throw
+    }
+
+    return @{
+        workbook   = $Workbook.Name
+        source     = "$($sourceSheet.Name)!$($source.Address($false, $false))"
+        pivot      = (Get-PivotSummary -Table $table -Sheet $target)
+        preview    = (Read-RangeText -Range $table.TableRange1 -MaxRows 40 -MaxColumns 12)
+        addedSheet = $(if ($addedSheet) { [string]$target.Name } else { $null })
+        chart      = $chartName
+        saved      = [bool]$Workbook.Saved
+    }
+}
+
+function Invoke-ExcelPivot {
+    param($Request)
+
+    $app = Get-OfficeApp -ProgId 'Excel.Application' -AttachOnly $true
+    $wb = Get-Workbook -App $app -Name $Request.workbook
+    $action = [string]$Request.action
+
+    if ($action -eq 'list') {
+        $tables = @()
+        foreach ($ws in $wb.Worksheets) {
+            $found = $ws.PivotTables()
+            for ($i = 1; $i -le $found.Count; $i++) { $tables += Get-PivotSummary -Table $found.Item($i) -Sheet $ws }
+        }
+        return @{ workbook = $wb.Name; pivots = $tables }
+    }
+
+    if ($action -eq 'create') { return New-ExcelPivot -App $app -Workbook $wb -Request $Request }
+
+    if ($action -eq 'refresh') {
+        $refreshed = @()
+        if ([string]::IsNullOrWhiteSpace($Request.name)) {
+            foreach ($ws in $wb.Worksheets) {
+                $found = $ws.PivotTables()
+                for ($i = 1; $i -le $found.Count; $i++) { $found.Item($i).RefreshTable() | Out-Null; $refreshed += "$($ws.Name)!$($found.Item($i).Name)" }
+            }
+        } else {
+            $found = Find-PivotTable -Workbook $wb -Name ([string]$Request.name)
+            $found.table.RefreshTable() | Out-Null
+            $refreshed += "$($found.sheet.Name)!$($found.table.Name)"
+        }
+        return @{ workbook = $wb.Name; refreshed = $refreshed; saved = [bool]$wb.Saved }
+    }
+
+    if ($action -eq 'read') {
+        $found = Find-PivotTable -Workbook $wb -Name ([string]$Request.name)
+        return @{
+            workbook = $wb.Name
+            pivot    = (Get-PivotSummary -Table $found.table -Sheet $found.sheet)
+            preview  = (Read-RangeText -Range $found.table.TableRange1 -MaxRows 200 -MaxColumns 30)
+        }
+    }
+
+    if ($action -eq 'delete') {
+        $found = Find-PivotTable -Workbook $wb -Name ([string]$Request.name)
+        $summary = Get-PivotSummary -Table $found.table -Sheet $found.sheet
+        # Clearing the whole table range is how Excel's object model removes a pivot table.
+        $found.table.TableRange2.Clear() | Out-Null
+        return @{ workbook = $wb.Name; deleted = $summary; saved = [bool]$wb.Saved }
+    }
+
+    throw "Unknown pivot table action '$action'. Use list, create, read, refresh or delete."
+}
+
 function Invoke-ExcelReadRange {
     param($Request)
 
@@ -2606,6 +3262,9 @@ function Invoke-Request {
         'excel.runMacro'        { return Invoke-ExcelRunMacro -Request $Request }
         'excel.evaluate'        { return Invoke-ExcelEvaluate -Request $Request }
         'excel.calculate'       { return Invoke-ExcelCalculate -Request $Request }
+        'excel.rangeShape'      { return Invoke-ExcelRangeShape -Request $Request }
+        'excel.chart'           { return Invoke-ExcelChart -Request $Request }
+        'excel.pivot'           { return Invoke-ExcelPivot -Request $Request }
         'outlook.folders'       { return Invoke-OutlookFolders -Request $Request }
         'outlook.validateFolder' { return Invoke-OutlookValidateFolder -Request $Request }
         'outlook.harvest'       { return Invoke-OutlookHarvest -Request $Request }

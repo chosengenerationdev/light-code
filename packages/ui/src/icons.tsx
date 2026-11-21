@@ -201,6 +201,26 @@ export function HistoryIcon({ size = 16 }: IconProps): ReactElement {
   )
 }
 
+/** The Files panel: a folder with a file standing in it. */
+export function FilesIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M1.75 4.5 V12.5 a1 1 0 0 0 1 1 H13.25 a1 1 0 0 0 1-1 V6.25 a1 1 0 0 0-1-1 H7.5 L6 3.5 H2.75 a1 1 0 0 0-1 1 Z" />
+      <path d="M5.5 8.5 H10.5 M5.5 10.75 H9" />
+    </svg>
+  )
+}
+
 export function NewTaskIcon({ size = 16 }: IconProps): ReactElement {
   return (
     <svg

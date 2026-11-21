@@ -61,10 +61,13 @@ function caseInsensitive(character: string): string {
  * An empty segment means "everything", which is what someone who has typed `@` or `@src/` wants:
  * the ranking then decides which of it to show.
  */
-export function mentionGlob(segment: string, mode: 'contains' | 'prefix' = 'contains', depth?: number): string {
-  if (segment.length === 0) return '**/*'
+export function mentionGlob(segment: string, mode: 'contains' | 'prefix' | 'folders' = 'contains', depth?: number): string {
+  if (segment.length === 0) return mode === 'folders' ? '**/*/**' : '**/*'
   const body = [...segment].map(caseInsensitive).join('')
   if (mode === 'contains') return `**/*${body}*`
+  // `folders`: every file under a folder whose name contains it; `foldersOf` recovers the folders,
+  // since an index of files has no other way to answer about folders.
+  if (mode === 'folders') return `**/*${body}*/**`
   // `prefix`: names that start with it - the pass that runs when the first scan hit its cap
   // (`mentionSearch.ts`). With a depth, exactly that many folders down: `*` never crosses `/`.
   return depth === undefined ? `**/${body}*` : `${'*/'.repeat(depth)}${body}*`
@@ -81,4 +84,24 @@ export function mentionSegment(query: string): string {
   const trimmed = query.trim()
   const separator = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
   return trimmed.slice(separator + 1)
+}
+
+/**
+ * The folders under `root` whose name contains `segment` (any case), recovered from file paths -
+ * for a host whose index only knows files (`mentionGlob(…, 'folders')`). Absolute, `root` excluded.
+ */
+export function foldersOf(files: readonly string[], segment: string, root: string, separator = '/'): string[] {
+  const needle = segment.toLowerCase()
+  const normalise = (p: string): string => p.replace(/[\\/]/g, separator)
+  const base = normalise(root).replace(/[\\/]+$/, '')
+  const found = new Set<string>()
+  for (const file of files) {
+    const full = normalise(file)
+    if (!full.toLowerCase().startsWith(`${base.toLowerCase()}${separator}`)) continue
+    const parts = full.slice(base.length + 1).split(separator)
+    for (let i = 0; i < parts.length - 1; i++) {
+      if ((parts[i] ?? '').toLowerCase().includes(needle)) found.add([base, ...parts.slice(0, i + 1)].join(separator))
+    }
+  }
+  return [...found]
 }

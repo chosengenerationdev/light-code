@@ -17,6 +17,8 @@ export type ObservedEvent =
   | { kind: 'refused'; at: number; tool: string; reason: string }
   | { kind: 'toolResult'; at: number; tool: string; ok: boolean; text: string }
   | { kind: 'turnEnd'; at: number; ending: 'done' | 'question' | 'error' | 'cancelled'; error?: string }
+  /** The decision model's answer and what Light Code did with it (Agent team routing, a strategy loop's verdict). */
+  | { kind: 'decision'; at: number; purpose: string; question: string; outcome: string; probabilities?: Record<string, number> }
 
 /** Per field, in characters. Reasoning and results are where the volume is. */
 export const EVENT_LIMITS = { text: 8_000, reasoning: 6_000, args: 4_000, preview: 4_000, result: 3_000 } as const
@@ -44,6 +46,8 @@ export function capEvent(event: ObservedEvent): ObservedEvent {
       return { ...event, text: cap(event.text, EVENT_LIMITS.result) }
     case 'turnEnd':
       return event.error === undefined ? event : { ...event, error: cap(event.error, EVENT_LIMITS.result) }
+    case 'decision':
+      return { ...event, question: cap(event.question, EVENT_LIMITS.text) }
   }
 }
 

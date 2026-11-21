@@ -1,3 +1,4 @@
+import type { ArtifactInfo, ArtifactList } from '../artifacts/types.js'
 import type { HubGitCounts } from '../jupyter/hubGit.js'
 import type { Strategy, StrategyExchange, StrategyProgress } from '../strategy/strategy.js'
 import type { ObserversConfig } from '../config/schema.js'
@@ -48,6 +49,35 @@ import type { ToolGroup, ToolPreview } from '../tools/types.js'
 import type { DatasetConfig } from '../dataset/types.js'
 import type { ChartSpec } from '../charts/types.js'
 import type { DiagramSpec } from '../diagrams/types.js'
+
+/** Settings → Agents → Decision model (config `decisionModel`). */
+export interface DecisionModelSettings {
+  profileId?: string | undefined
+  endpoint?: string | undefined
+  routing?: boolean | undefined
+  routeThreshold?: number | undefined
+  judgeLoops?: boolean | undefined
+  loopThreshold?: number | undefined
+  firstPass?: boolean | undefined
+  firstPassThreshold?: number | undefined
+  scoreHandOvers?: boolean | undefined
+  suggestRoles?: boolean | undefined
+  newTopics?: boolean | undefined
+  triageAlerts?: boolean | undefined
+  suggestThreshold?: number | undefined
+}
+
+/** One sample question asked by Test decision model, and what was read from the answer. */
+export interface DecisionTestResult {
+  question: string
+  expected: string
+  ok: boolean
+  source: 'systemone' | 'json' | 'logprobs' | 'none'
+  probabilities?: Record<string, number>
+  error?: string
+  raw: string
+  ms: number
+}
 
 export type AtlassianProductId = 'confluence' | 'jira' | 'bitbucket' | 'jenkins' | 'autosys'
 
@@ -790,6 +820,35 @@ export type UiToHostMessage =
   | { type: 'setAutoApprove'; group: ApprovableGroup; enabled: boolean }
   | { type: 'setMaxIterations'; value: number }
   | { type: 'setAutoCompact'; value: boolean }
+  /** Hand off to a new chat by itself when the context limit is reached (`autoHandoff`). */
+  | { type: 'setAutoHandoff'; value: boolean }
+  /** Let a chat's replies run without a step limit (`unlimitedSteps`). */
+  | { type: 'setUnlimitedSteps'; value: boolean }
+  /** Suggestions in grey while typing (`composerCompletion`). */
+  | { type: 'setComposerCompletion'; value: boolean }
+  /** The rest of what is being typed, from the chat's model; answered by `completion` with the same id. */
+  | { type: 'requestCompletion'; id: string; text: string }
+  /** Settings → Agents → Decision model: what is set, and the profiles to pick from. */
+  | { type: 'requestDecisionModel' }
+  | { type: 'saveDecisionModel'; settings: DecisionModelSettings }
+  /** Two sample questions to the decision model, answered by `decisionModelTest`. */
+  | { type: 'testDecisionModel' }
+  /** This chat: the decision model picks the skill and tool for each request (saved with the chat, carried on). */
+  | { type: 'setChatSkillToolPicks'; value: 'off' | 'skills' | 'tools' | 'both' }
+  | { type: 'requestChatSkillToolPicks' }
+  /** Settings → Agents → Web chat (`webchat/`): consulting the internal web chat through the user's Chrome. */
+  | { type: 'requestWebChat' }
+  | { type: 'startWebChatCapture'; pageUrl: string; server: string }
+  /** Which Chrome DevTools MCP server is the web chat's: only that one is used and withheld from the assistant. */
+  | { type: 'setWebChatServer'; server: string }
+  | { type: 'sendWebChatPhrase' }
+  /** The user approves the backend address the capture found: only that one is used afterwards. */
+  | { type: 'confirmWebChatCapture'; index: number }
+  | { type: 'cancelWebChatCapture' }
+  | { type: 'setWebChatModel'; model?: string }
+  | { type: 'clearWebChat' }
+  /** The page asks what the chat is still getting ready, when it loads. */
+  | { type: 'requestStartupProgress' }
   | { type: 'setConnectionRetry'; stallSeconds: number; retries: number }
   /** Folders tools may read outside the workspace. Replaces the whole list. */
   | { type: 'setReadRoots'; roots: string[] }
@@ -1104,7 +1163,11 @@ export type UiToHostMessage =
   | { type: 'saveStrategy'; strategy: unknown; use?: boolean }
   | { type: 'deleteStrategy'; id: string }
   /** A library strategy for this chat, or none. */
-  | { type: 'useStrategy'; id?: string }
+  /**
+   * Puts a strategy to use in this chat: one from the library by `id`, or - a new Fire Code tab taking the strategy of the
+   * tab it was opened from - the `strategy` itself, which may carry contracts that chat agreed. Neither: stop using one.
+   */
+  | { type: 'useStrategy'; id?: string; strategy?: unknown }
   /** Opens the Strategy window as an editor tab (`HostUi.openStrategyWindow`). */
   | { type: 'openStrategyWindow' }
   /** From the Strategy tab: put this question in the chat's message box. */
@@ -1217,6 +1280,12 @@ export type UiToHostMessage =
   | { type: 'deleteSkillFile'; name: string }
   /** Opens a skill or Python tool file in an editor tab, where it can actually be edited. */
   | { type: 'openManagedFile'; path: string }
+  /** The Files panel (`ArtifactsButton.tsx`): the workspace's files, newest first, with what this chat wrote. */
+  | { type: 'requestArtifacts' }
+  /** One file's details, read when its row is opened. The path is workspace-relative and re-confined host-side. */
+  | { type: 'describeArtifact'; path: string }
+  /** Open a file with its usual program, or show it in its folder. Only offered where the host can (`artifacts.opens`). */
+  | { type: 'openArtifact'; path: string; how: 'open' | 'reveal' }
   /**
    * The panel's own editor saving a skill or tool. `mtimeMs` is when the file was read for editing:
    * a file changed on disk since then is not overwritten.
@@ -1428,6 +1497,8 @@ export type UiToHostMessage =
   | { type: 'importConfig'; path?: string; sections?: string[] }
 
 export type HostToUiMessage =
+  | { type: 'artifacts'; list?: ArtifactList; error?: string; opens: { open: boolean; reveal: boolean } }
+  | { type: 'artifactInfo'; path: string; info?: ArtifactInfo; error?: string }
   | { type: 'addonPage'; view?: AddonPageView; package: string; error?: string; saved?: boolean }
   | { type: 'addonActionResult'; package: string; id: string; tool: string; ok: boolean; text: string }
   | {
@@ -1606,6 +1677,14 @@ export type HostToUiMessage =
       maxIterations: number
       /** Whether history is compacted by itself near the limit. Off unless the user turned it on. */
       autoCompact: boolean
+      /** Whether a chat near its context limit hands off to a new chat by itself. Off unless turned on. */
+      autoHandoff: boolean
+      /** No step limit for this user's chat replies (scheduled runs keep theirs). */
+      unlimitedSteps: boolean
+      /** Grey suggestions while typing in the chat box, from the chat's model. Off unless turned on. */
+      composerCompletion: boolean
+      /** The decision model's profile label, when one is set up: Agent team shows "decisions by …". */
+      decisionLabel?: string
       /** Seconds of silence before a model request is retried; 0 = never. */
       stallSeconds: number
       /** Retries for a failed or stalled model request. */
@@ -1853,7 +1932,15 @@ export type HostToUiMessage =
    * How a handoff is going, so a slow model never looks like a hung button: what it is doing, how much of
    * the note is written, and how it ended. `failed` and `cancelled` leave the current chat as it was.
    */
-  | { type: 'handoffProgress'; phase: 'gathering' | 'writing' | 'starting' | 'done' | 'failed' | 'cancelled'; written?: number; message?: string }
+  /** `continuing` on `done`: the new chat's first turn has started by itself, so the panel shows it running. */
+  /** A turn the host started by itself - another codebase's agent asked this chat something - shown running. */
+  | { type: 'hostTurnStarted' }
+  /**
+   * What the chat is still getting ready, shown over the message box with how long each has taken (asked for: chats
+   * took over 90 seconds to start, with nothing saying why). Empty when everything is ready.
+   */
+  | { type: 'startupProgress'; waiting: { label: string; since: number; full?: string }[] }
+  | { type: 'handoffProgress'; phase: 'gathering' | 'writing' | 'starting' | 'done' | 'failed' | 'cancelled'; written?: number; message?: string; continuing?: boolean }
   /** The answer to `saveEditorFile`. `conflict` means the file changed on disk after it was opened. */
   | { type: 'editorSaved'; path: string; ok: boolean; mtimeMs?: number; conflict?: boolean; message?: string }
   | { type: 'profiles'; profiles: ProfileSummary[]; activeProfileId: string | undefined }
@@ -1889,6 +1976,36 @@ export type HostToUiMessage =
   | { type: 'mentionCandidates'; query: string; paths: string[] }
   /** The message, or why there is none. Only a suggestion: the person edits it and commits. */
   | { type: 'commitMessageSuggestion'; text?: string; error?: string }
+  /** The suggestion for `requestCompletion` `id`; empty when there is none. */
+  | { type: 'completion'; id: string; text: string }
+  | { type: 'decisionModel'; settings: DecisionModelSettings; profiles: { id: string; label: string }[]; label?: string; error?: string }
+  | { type: 'decisionModelTest'; results: DecisionTestResult[] }
+  | { type: 'chatSkillToolPicks'; value: 'off' | 'skills' | 'tools' | 'both' }
+  | {
+      type: 'webChat'
+      /** False on a shared server: there is no personal folder to keep it in. */
+      available: boolean
+      setup?: { pageUrl: string; backend: string; method: string; model?: string; modelOverride?: string; fromPage: string[]; capturedAt: string }
+      /** Every connected Chrome DevTools MCP server with what stops it being used for the web chat, and the one chosen. */
+      /** `registry`: where an npx-started server downloads from (npm's own setting), shown to the user. */
+      chrome: { servers: { name: string; problems: string[]; registry?: string }[]; chosen?: string }
+      /** Why the web chat's address is not inside the network; empty when it is. */
+      hostProblem?: string
+      message?: string
+    }
+  | {
+      type: 'webChatCapture'
+      phase: 'waiting' | 'found' | 'failed'
+      phrase?: string
+      candidates?: { backend: string; method: string; model?: string; answerPreview: string; fromPage: string[] }[]
+      refused?: string[]
+      message?: string
+    }
+  /**
+   * Where the decision model sent this message in Agent team mode, shown above the message box with a way to undo it.
+   * Absent `role` clears it.
+   */
+  | { type: 'decisionRoute'; role?: string; name?: string; probability?: number; note?: string }
   | { type: 'hubGitResult'; op: 'status' | 'commit' | 'pull'; ok: boolean; text: string; counts?: HubGitCounts }
   /**
    * Files to add to the message being written, as `@` mentions - from the picker, or from the
@@ -2476,6 +2593,10 @@ export interface StrategiesMessage {
   roles: { id: string; name: string; summary: string; assigned: boolean; label?: string; ownProcess?: boolean }[]
   /** The specialists' processes in this chat. */
   processes: { role: string; generation: number; handoffs: number; tokens?: number; window: number; pid?: number }[]
+  /** A decision model is set up (Settings → Agents): the window offers decision steps. */
+  decisionModel?: boolean
+  /** What this chat has the decision model pick: Fire Code carries it into a new tab with the strategy. */
+  skillToolPicks?: 'skills' | 'tools' | 'both'
 }
 
 /** Settings → Project's Team admins panel and the Team reviews tab. */

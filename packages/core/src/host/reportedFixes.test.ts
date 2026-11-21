@@ -53,7 +53,9 @@ describe('the Python tab', () => {
     expect(show.indexOf('await configurePythonFromSettings()')).toBeGreaterThan(show.indexOf('previewStatus'))
     expect(show.indexOf('await postPython()')).toBeGreaterThan(show.indexOf('await configurePythonFromSettings()'))
     const configure = fn('async function configurePythonFromSettings(')
-    expect(configure).toContain('pythonFolders(config)')
+    // Through the one serialised setup, which passes the folders (`configurePython`).
+    expect(configure).toContain('configurePython(config)')
+    expect(fn('function configurePython(')).toContain('pythonFolders(config)')
     expect(configure).toContain('if (userTurnRunning || runningScheduleId !== undefined) return')
   })
 })

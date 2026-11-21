@@ -130,6 +130,13 @@ export interface RunAgentTurnOptions {
    */
   autoCompact?: boolean
   /**
+   * Hand off to a new chat rather than compact (asked for: a switch that "should auto handoff to new session when
+   * context limit is hit"). Called, in place of compacting, when the conversation nears the window or the provider
+   * refuses it as too long; the turn then ends quietly and the host writes the handoff, whose new chat carries on.
+   * Only consulted while `autoCompact` is off.
+   */
+  onContextFull?: () => void
+  /**
    * Seconds a model request may go without sending anything at all - text, reasoning, a tool call,
    * even its response headers - before it is treated as stalled, stopped and sent again. 0 turns
    * the watchdog off.
@@ -191,6 +198,8 @@ interface StreamOutcome {
   /** The prompt's real size, when the provider said. */
   usage?: { inputTokens: number; outputTokens?: number; cachedTokens?: number }
   toolCall?: ToolCall
+  /** Further calls in the same message, by name: not run (one call per message, §5). */
+  extraCalls?: string[]
   error?: string
   /** The watchdog stopped it: nothing arrived for `stallSeconds`. */
   stalled: boolean
@@ -256,6 +265,7 @@ async function consumeStream(
       } else if (chunk.type === 'toolCall') {
         // "One tool call per assistant message" (CLAUDE.md §5) — ignore extras defensively.
         if (outcome.toolCall === undefined) outcome.toolCall = chunk.toolCall
+        else (outcome.extraCalls ??= []).push(chunk.toolCall.name)
       } else if (chunk.type === 'usage') {
         outcome.usage = { inputTokens: chunk.inputTokens, ...(chunk.outputTokens !== undefined ? { outputTokens: chunk.outputTokens } : {}), ...(chunk.cachedTokens !== undefined ? { cachedTokens: chunk.cachedTokens } : {}) }
       } else if (chunk.type === 'error') {
@@ -313,6 +323,8 @@ const MAX_CONSECUTIVE_MISTAKES = 3
  */
 /** What a request's prompt was estimated at, before calibration - kept to calibrate against the real count. */
 interface RequestMeter {
+  /** Set when the conversation is near the window and the host hands off instead of compacting. */
+  contextFull?: boolean
   estimated: number
   breakdown?: TokenBreakdown
   dropped: number
@@ -333,6 +345,20 @@ async function prepareModelMessages(
    * reopened rather than staying unusable for ever. See `repairHistory.ts`.
    */
   let messages = repairUnansweredToolCalls(conversation.toModelMessages())
+
+  // Handing off instead: say so to the loop and leave the history alone.
+  if (
+    options.onContextFull !== undefined &&
+    options.autoCompact === false &&
+    options.compactionEnabled !== false &&
+    contextWindow > 0 &&
+    options.contextWindowKnown !== false &&
+    meter !== undefined
+  ) {
+    const estimated = scaleBreakdown(computeBreakdown(messages, tools, contextWindow), ratio).total
+    // On size alone: unlike compacting, a handoff needs no stretch of older messages to work on.
+    if (shouldCompact(messages, estimated, contextWindow, { ...(options.compaction ?? {}), minimumToCompact: 0 })) meter.contextFull = true
+  }
 
   if (
     options.compactionEnabled !== false &&
@@ -717,6 +743,11 @@ export async function runAgentTurn(
     // record (§12, and the Phase 6b rule that compaction must not destroy stored history).
     const meter: RequestMeter = { estimated: 0, dropped: 0 }
     const modelMessages = await prepareModelMessages(conversation, provider, tools, options, events, meter)
+    if (meter.contextFull === true && options.onContextFull !== undefined) {
+      options.onContextFull()
+      events.onDone()
+      return
+    }
 
     /*
      * One request, sent again when it fails in a way a second attempt usually gets past - a dropped
@@ -796,6 +827,11 @@ export async function runAgentTurn(
       options.autoCompact === false &&
       isContextOverflow(streamError)
     ) {
+      if (options.onContextFull !== undefined) {
+        options.onContextFull()
+        events.onDone()
+        return
+      }
       events.onError(
         `${streamError}
 
@@ -918,10 +954,19 @@ The conversation is longer than this model accepts. Press **Compact now** under 
      * Said in the result when the pictures cannot be shown, so the model does not describe an
      * image it never saw — the failure the queued-attachment gate exists for, from the other side.
      */
-    const forModel =
+    const shown =
       pictures.length > 0 && options.supportsVision !== true
         ? `${capped}\n\n(${String(pictures.length)} image(s) were fetched but not shown: the current model does not accept images.)`
         : capped
+    /*
+     * Said, so a model that sent several calls at once (Gemini does) does not go on as if they all ran.
+     * Only ever adds a line when there were extras; a single call reads exactly as before.
+     */
+    const extras = outcome.extraCalls ?? []
+    const forModel =
+      extras.length > 0
+        ? `${shown}\n\n(Only ${toolCall.name} ran. ${extras.join(', ')} ${extras.length === 1 ? 'was' : 'were'} not run: make one tool call per message, then the next after its result.)`
+        : shown
     conversation.addToolResultMessage(toolCall.id, forModel)
     /*
      * Straight after the result, so the call/result pair is intact — the same place queued user

@@ -39,8 +39,15 @@ export const DISPLAY_WIDTHS: Record<DisplaySize, number | undefined> = {
   full: undefined,
 }
 
-/** The default when nothing asked. `full`, so no existing chart or diagram changes size. */
-export const DEFAULT_DISPLAY_SIZE: DisplaySize = 'full'
+/**
+ * The default when nothing asked: `large`, a cap that only a wide window ever reaches.
+ *
+ * It was `full`, so that nothing changed size when sizes arrived - and in VS Code's side panel full and large look
+ * the same. In Fire Code's wide window full meant a chart stretched across the screen beside text that reads
+ * comfortably at a fraction of it (reported: "users use light code to avoid widened tables"). The agent can still ask
+ * for `full` when a picture deserves it.
+ */
+export const DEFAULT_DISPLAY_SIZE: DisplaySize = 'large'
 
 /**
  * A `maxWidth` for a container, or undefined to leave it uncapped.
@@ -57,5 +64,6 @@ export function displayMaxWidth(size: string | undefined): number | undefined {
 /** The sentence both tools use to describe the field, so they cannot describe it differently. */
 export const DISPLAY_SIZE_DESCRIPTION =
   'How wide to draw it: small (an aside), medium (the ordinary case), large (worth studying), or ' +
-  'full (the whole width available). Use a smaller one when the user says it is too big, and ' +
-  'small or medium for something beside a paragraph of text rather than the point of the answer.'
+  'full (the whole width available). Omitted, it is drawn large. Use a smaller one when the user says it is too ' +
+  'big, small or medium for something beside a paragraph of text rather than the point of the answer, and full ' +
+  'only for a wide picture the user asked to see big.'

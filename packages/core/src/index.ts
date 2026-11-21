@@ -65,7 +65,7 @@ export {
   mentionExcludes,
 } from './context/mentionExcludes.js'
 export { compareMentionCandidates, matchesMentionQuery } from './context/mentionRanking.js'
-export { mentionGlob, mentionSegment } from './context/mentionGlob.js'
+export { foldersOf, mentionGlob, mentionSegment } from './context/mentionGlob.js'
 export { searchMentions, type MentionIndex } from './context/mentionSearch.js'
 export {
   JUPYTER_CONNECTION_ENV,
@@ -188,6 +188,7 @@ export {
   type HostModelRequest,
 } from './providers/hostModels.js'
 export { toPortableParameters } from './providers/schema.js'
+export { openWithDefaultApp, revealInFolder } from './platform/node/openWith.js'
 export { createRelayDebugReader, createRelayLanguageModels, defaultRelayDir, NO_VSCODE_DEBUG, NO_VSCODE_WINDOW, startLmRelay } from './platform/node/lmRelay.js'
 export {
   toOpenAITools,
@@ -261,6 +262,7 @@ export {
   type TeamContext,
 } from './agents/team.js'
 export { DEFAULT_TEAM_GUIDANCE, buildTeamGuidance } from './agents/guidance.js'
+export { MAX_DEPTH as CODEBASE_AGENT_MAX_DEPTH, type CodebaseAgentChannel, type CodebaseAgentReply, type CodebaseAgentTask } from './agents/codebaseAgents.js'
 export { buildAgentBriefing, type AgentBriefingInput } from './agents/briefing.js'
 export { CONSULT_MAX_STEPS, runConsultation, toolsForConsultation } from './agents/consult.js'
 export { buildPlanGuidance, PLAN_LIMIT } from './agent/plan.js'
@@ -508,6 +510,7 @@ export {
   parseCheckpoints,
   checkpointViews,
   pruneProgress,
+  startsNewWork,
   markCheckpoint,
   attributeConsultation,
   progressSummary,

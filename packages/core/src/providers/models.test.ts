@@ -87,6 +87,37 @@ describe('listModels', () => {
     expect((await listModels(http, profile, auth)).ids).toEqual(['gemini-2.5-pro'])
   })
 
+  it('leaves out Gemini models that cannot chat', async () => {
+    const http = respond(200, {
+      models: [
+        { name: 'models/gemini-4-pro', supportedGenerationMethods: ['generateContent', 'countTokens'] },
+        { name: 'models/text-embedding-004', supportedGenerationMethods: ['embedContent'] },
+      ],
+    })
+    expect((await listModels(http, profile, auth)).ids).toEqual(['gemini-4-pro'])
+  })
+
+  /** Gemini returns 50 a page by default; newer models were past the first page and never appeared. */
+  it('follows every Gemini page, asking for large ones', async () => {
+    const urls: string[] = []
+    const pages: Record<string, unknown> = {
+      '': { models: [{ name: 'models/gemini-2.5-flash' }], nextPageToken: 'p2' },
+      p2: { models: [{ name: 'models/gemini-4-pro' }], nextPageToken: 'p2' },
+    }
+    const http: HttpClient = {
+      async request(url: string): Promise<HttpResponse> {
+        urls.push(url)
+        const token = new URL(url).searchParams.get('pageToken') ?? ''
+        return { status: 200, headers: {}, text: async () => '', json: async <T>() => pages[token] as T, body: null }
+      },
+    }
+    const result = await listModels(http, { ...profile, wireFormat: 'gemini' }, auth)
+    expect(result.ids).toEqual(['gemini-2.5-flash', 'gemini-4-pro'])
+    expect(urls[0]).toContain('pageSize=1000')
+    // The same token twice ends the walk rather than looping.
+    expect(urls).toHaveLength(2)
+  })
+
   it('accepts a bare array of strings', async () => {
     const http = respond(200, ['x', 'y', 'x'])
     expect((await listModels(http, profile, auth)).ids).toEqual(['x', 'y'])

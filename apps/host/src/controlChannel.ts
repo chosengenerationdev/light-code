@@ -1,4 +1,4 @@
-import type { MonitorAnswer, MonitorExecutorChannel, MonitoringChannel, MonitorRequest } from '@light-code/core'
+import type { CodebaseAgentChannel, CodebaseAgentReply, CodebaseAgentTask, MonitorAnswer, MonitorExecutorChannel, MonitoringChannel, MonitorRequest } from '@light-code/core'
 
 /**
  * Fire Code's control channel (`--control-stdin`): this host's stdin, after the vault key, carries Fire
@@ -37,6 +37,11 @@ export class StdioControl {
         w.reject(new Error('Fire Code is no longer listening.'))
         this.waiting.delete(id)
       }
+      for (const [id, w] of this.asking) {
+        w.finish()
+        w.resolve({ ok: false, text: 'Fire Code is no longer listening.' })
+        this.asking.delete(id)
+      }
     })
     input.resume()
   }
@@ -64,6 +69,31 @@ export class StdioControl {
     } catch {
       return
     }
+    // Another codebase's agent answered what this chat asked.
+    if (message.type === 'agentReply' && typeof message.id === 'string') {
+      const w = this.asking.get(message.id)
+      if (w === undefined) return
+      this.asking.delete(message.id)
+      w.finish()
+      w.resolve({
+        ok: message.ok === true,
+        text: typeof message['text'] === 'string' ? message['text'] : message.error ?? 'No answer.',
+        ...(typeof message['chat'] === 'string' ? { chat: message['chat'] } : {}),
+      })
+      return
+    }
+    // Another codebase's agent asks this chat something: Fire Code opened this tab for it.
+    if (message.type === 'agentTask' && typeof message.id === 'string' && typeof message['message'] === 'string') {
+      const task: CodebaseAgentTask = {
+        id: message.id,
+        from: typeof message['from'] === 'string' ? message['from'] : 'another codebase',
+        message: message['message'],
+        depth: typeof message['depth'] === 'number' ? message['depth'] : 1,
+      }
+      if (this.taskHandler !== undefined) this.taskHandler(task)
+      else this.queuedTasks.push(task)
+      return
+    }
     if (message.type === 'monitorReply' && typeof message.id === 'string') {
       const w = this.waiting.get(message.id)
       if (w === undefined) return
@@ -86,6 +116,8 @@ export class StdioControl {
               ? { kind, id, context: (message['context'] ?? {}) as Record<string, unknown> }
               : kind === 'probe'
                 ? { kind, id, tool: String(message['tool'] ?? '') }
+              : kind === 'triage'
+                ? { kind, id, context: (message['context'] ?? {}) as Record<string, unknown> }
               : kind === 'sync'
                 ? { kind, id }
               : kind === 'history'
@@ -123,6 +155,46 @@ export class StdioControl {
           this.waiting.set(id, { resolve, reject, timer })
           this.send({ type: 'request', id, op, args })
         }),
+    }
+  }
+
+  private readonly asking = new Map<string, { resolve: (reply: CodebaseAgentReply) => void; finish: () => void }>()
+  private taskHandler: ((task: CodebaseAgentTask) => void) | undefined
+  /** Requests that arrived before the session registered its handler - a new tab's host is still starting. */
+  private readonly queuedTasks: CodebaseAgentTask[] = []
+
+  /**
+   * Asking other codebases' agents and answering theirs (`agents/codebaseAgents.ts`). No reply timeout of its own
+   * beyond the one asked for: the other agent may work for many minutes.
+   */
+  agents(): CodebaseAgentChannel {
+    return {
+      ask: (codebase, message, options) =>
+        new Promise<CodebaseAgentReply>((resolve, reject) => {
+          const id = `a${String(++this.next)}`
+          const finish = (): void => {
+            clearTimeout(timer)
+            options.signal?.removeEventListener('abort', onAbort)
+          }
+          const timer = setTimeout(() => {
+            this.asking.delete(id)
+            finish()
+            reject(new Error(`no answer within ${String(Math.round(options.timeoutMs / 60_000))} minute(s). The other agent may still be working in its tab.`))
+          }, options.timeoutMs)
+          const onAbort = (): void => {
+            this.asking.delete(id)
+            finish()
+            reject(new Error('stopped waiting. The other agent may still be working in its tab.'))
+          }
+          options.signal?.addEventListener('abort', onAbort, { once: true })
+          this.asking.set(id, { resolve, finish })
+          this.send({ type: 'agentAsk', id, codebase, message, depth: options.depth })
+        }),
+      onTask: (handler) => {
+        this.taskHandler = handler
+        for (const task of this.queuedTasks.splice(0)) handler(task)
+      },
+      done: (id, reply) => this.send({ type: 'agentDone', id, ok: reply.ok, text: reply.text, ...(reply.waiting === true ? { waiting: true } : {}) }),
     }
   }
 

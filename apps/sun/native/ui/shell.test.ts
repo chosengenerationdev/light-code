@@ -258,3 +258,170 @@ describe('a branch chat in VS Code', () => {
     expect(sent.at(-1)).toEqual({ cmd: 'openVsCode', id: 'p1~3' })
   })
 })
+
+/** Asked for: export the codebases and their open chats, and import them on another computer. */
+describe('moving the setup to another computer', () => {
+  const items = [
+    { name: 'Api', path: 'D:/code/api', exists: false, added: false, hub: null, chats: ['Main', 'Review'], hasSettings: true },
+    { name: 'One', path: 'D:/one', exists: true, added: true, hub: null, chats: ['Chat 1'], hasSettings: false },
+    {
+      name: 'Notebooks',
+      path: '',
+      exists: false,
+      added: false,
+      hub: { url: 'https://hub.example', user: 'me', server: null, folders: ['work'], credentialLabel: 'JupyterHub me@hub', credential: null },
+      chats: ['Chat 1'],
+      hasSettings: false,
+    },
+  ]
+  const button = (text: string): HTMLButtonElement =>
+    [...document.querySelectorAll('button')].find((b) => b.textContent?.startsWith(text)) as HTMLButtonElement
+
+  it('lists each codebase with its folder and chats, leaving one already here unticked', () => {
+    receive({ type: 'setupPreview', file: 'C:/x/fire-code-setup.json', items })
+    const ticks = [...document.querySelectorAll<HTMLInputElement>('input[aria-label^="Import "]')]
+    expect(ticks.map((t) => t.checked)).toEqual([false, false, true]) // missing folder, already added, hub
+    expect(document.body.textContent).toContain('2 chats: Main, Review')
+    expect(document.body.textContent).toContain('Not found on this computer')
+    expect(document.body.textContent).toContain('JupyterHub me at https://hub.example')
+  })
+
+  it('sends the folder chosen here, the hub token, and whether to use the settings', () => {
+    receive({ type: 'setupPreview', file: 'C:/x/fire-code-setup.json', items })
+    button('Browse').click()
+    expect(sent.at(-1)).toEqual({ cmd: 'pickSetupFolder', index: 0 })
+    receive({ type: 'setupFolderPicked', index: 0, path: 'E:/work/api', added: false })
+    const token = document.querySelector<HTMLInputElement>('input[aria-label="Notebooks JupyterHub token"]')!
+    token.value = ' tok '
+    token.dispatchEvent(new Event('input'))
+    button('Import 2').click()
+    expect(sent.at(-1)).toEqual({
+      cmd: 'importSetup',
+      items: [
+        { index: 0, path: 'E:/work/api', settings: true },
+        { index: 2, token: 'tok', settings: false },
+      ],
+    })
+  })
+})
+
+/*
+ * Reported: Pull on a hub codebase said "Open the codebase first - git runs on the hub through its agent" while its chat
+ * plainly worked, until Fire Code was restarted. Hub git went only to the first chat's page, and that page is unloaded
+ * after a few idle minutes while another chat is on screen.
+ */
+describe('git on the hub', () => {
+  const capture = (frame: HTMLIFrameElement): unknown[] => {
+    const delivered: unknown[] = []
+    Object.defineProperty(frame, 'contentWindow', { value: { postMessage: (message: unknown) => delivered.push(message) }, configurable: true })
+    return delivered
+  }
+  const pull = (): HTMLButtonElement => document.querySelector('[aria-label="Pull latest changes"]') as HTMLButtonElement
+
+  beforeEach(() => {
+    const projects = [{ id: 'p1', name: 'One', path: 'D:/one', chats: [{ id: 2, name: 'Chat 2' }], configMode: 'new', configFile: 'c', hub: { url: 'https://hub', user: 'u' } }]
+    receive({ type: 'init', version: 'x', projects, settings: { sleepMinutes: 30, unloadMinutes: 5, theme: 'system', accent: '#f26b1d', sidebarWidth: 264 }, accent: '#f26b1d', hasSource: false, dataFolder: 'X' })
+    receive({ type: 'status', totalMemory: 0, statuses: { p1: { phase: 'running', agent: 'idle', memory: 0 }, 'p1~2': { phase: 'running', agent: 'idle', memory: 0 } } })
+    // The hub's counts, from a page: the repository has an upstream, so Pull is offered.
+    fromPage(frameOf('p1~2')!, { hubGit: { op: 'status', ok: true, counts: { added: 0, modified: 0, deleted: 0, ahead: 0, behind: 1, upstream: true, branch: 'main', files: [] } } })
+  })
+
+  it("asks another chat of the codebase when the first chat's page was unloaded", () => {
+    const second = frameOf('p1~2')!
+    const delivered = capture(second)
+    fromPage(second, { ready: true })
+    // The first chat's page unloaded while idle.
+    frameOf('p1')!.remove()
+    expect(pull()).not.toBeNull()
+    pull().click()
+    expect(delivered).toContainEqual({ source: 'sun', ask: 'hubGit', op: 'pull' })
+    expect(document.body.textContent).not.toContain('Open the codebase first')
+  })
+
+  it('loads an unloaded page again and asks it once it is ready, rather than refusing', () => {
+    frameOf('p1')!.remove()
+    frameOf('p1~2')!.remove()
+    pull().click()
+    const frame = frameOf('p1')!
+    expect(frame).not.toBeNull()
+    const delivered = capture(frame)
+    expect(delivered).toEqual([])
+    fromPage(frame, { ready: true })
+    expect(delivered).toContainEqual({ source: 'sun', ask: 'hubGit', op: 'pull' })
+  })
+
+  it('starts a sleeping codebase to answer the button', () => {
+    receive({ type: 'status', totalMemory: 0, statuses: { p1: { phase: 'sleeping', agent: 'idle', memory: 0 }, 'p1~2': { phase: 'sleeping', agent: 'idle', memory: 0 } } })
+    sent.length = 0
+    pull().click()
+    expect(sent.filter((m) => m.cmd === 'start')).toEqual([{ cmd: 'start', id: 'p1' }])
+  })
+})
+
+/*
+ * Reported: "clicking + didnt carry the selected strategy in previous session". Each tab is its own agent, so the tab
+ * being left is asked for its strategy, and the new tab is handed it once its page is ready.
+ */
+describe('a new chat from +', () => {
+  it('asks the chat being left for its strategy and hands it to the new chat', () => {
+    const left = frameOf('p1~2')!
+    const fromLeft: unknown[] = []
+    Object.defineProperty(left, 'contentWindow', { value: { postMessage: (message: unknown) => fromLeft.push(message) }, configurable: true })
+    fromPage(left, { ready: true })
+    receive({ type: 'select', id: 'p1~2' })
+    sent.length = 0
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 't', ctrlKey: true, bubbles: true }))
+    expect(sent.find((m) => m.cmd === 'newChat')).toEqual({ cmd: 'newChat', id: 'p1' })
+    expect(fromLeft).toContainEqual({ source: 'sun', ask: 'shareStrategy' })
+
+    // The left chat answers; Fire Code made the new chat and selected it; its page comes up.
+    const strategy = { id: 's', name: 'Review first', nodes: [], edges: [], updatedAt: 1 }
+    fromPage(left, { carryStrategy: strategy })
+    receive({ type: 'projects', projects: [{ id: 'p1', name: 'One', path: 'D:/one', chats: [{ id: 2, name: 'Chat 2' }, { id: 3, name: 'Chat 3' }], configMode: 'new', configFile: 'c' }] })
+    receive({ type: 'select', id: 'p1~3' })
+    receive({ type: 'url', id: 'p1~3', url: 'http://127.0.0.1:5000/#t=new' })
+    receive({ type: 'status', totalMemory: 0, statuses: { p1: { phase: 'running', agent: 'idle', memory: 0 }, 'p1~2': { phase: 'running', agent: 'idle', memory: 0 }, 'p1~3': { phase: 'running', agent: 'idle', memory: 0 } } })
+    const fresh = frameOf('p1~3')!
+    const toFresh: unknown[] = []
+    Object.defineProperty(fresh, 'contentWindow', { value: { postMessage: (message: unknown) => toFresh.push(message) }, configurable: true })
+    fromPage(fresh, { ready: true })
+    expect(toFresh).toContainEqual({ source: 'sun', ask: 'useStrategy', strategy, picks: null })
+  })
+
+  it('hands nothing over when the chat being left has no strategy', () => {
+    const left = frameOf('p1~2')!
+    Object.defineProperty(left, 'contentWindow', { value: { postMessage: () => undefined }, configurable: true })
+    fromPage(left, { ready: true })
+    receive({ type: 'select', id: 'p1~2' })
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 't', ctrlKey: true, bubbles: true }))
+    fromPage(left, { carryStrategy: null })
+    receive({ type: 'projects', projects: [{ id: 'p1', name: 'One', path: 'D:/one', chats: [{ id: 2, name: 'Chat 2' }, { id: 3, name: 'Chat 3' }], configMode: 'new', configFile: 'c' }] })
+    receive({ type: 'select', id: 'p1~3' })
+    receive({ type: 'url', id: 'p1~3', url: 'http://127.0.0.1:5000/#t=new' })
+    receive({ type: 'status', totalMemory: 0, statuses: { p1: { phase: 'running', agent: 'idle', memory: 0 }, 'p1~2': { phase: 'running', agent: 'idle', memory: 0 }, 'p1~3': { phase: 'running', agent: 'idle', memory: 0 } } })
+    const fresh = frameOf('p1~3')!
+    const toFresh: unknown[] = []
+    Object.defineProperty(fresh, 'contentWindow', { value: { postMessage: (message: unknown) => toFresh.push(message) }, configurable: true })
+    fromPage(fresh, { ready: true })
+    expect(toFresh.some((m) => (m as { ask?: string }).ask === 'useStrategy')).toBe(false)
+  })
+
+  // The decision model's skill-and-tool picks are a chat's own setting too, and go with it - with or without a strategy.
+  it('carries the skill-and-tool switch to the new chat, even with no strategy', () => {
+    const left = frameOf('p1~2')!
+    Object.defineProperty(left, 'contentWindow', { value: { postMessage: () => undefined }, configurable: true })
+    fromPage(left, { ready: true })
+    receive({ type: 'select', id: 'p1~2' })
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 't', ctrlKey: true, bubbles: true }))
+    fromPage(left, { carryStrategy: null, carryPicks: 'skills' })
+    receive({ type: 'projects', projects: [{ id: 'p1', name: 'One', path: 'D:/one', chats: [{ id: 2, name: 'Chat 2' }, { id: 3, name: 'Chat 3' }], configMode: 'new', configFile: 'c' }] })
+    receive({ type: 'select', id: 'p1~3' })
+    receive({ type: 'url', id: 'p1~3', url: 'http://127.0.0.1:5000/#t=new' })
+    receive({ type: 'status', totalMemory: 0, statuses: { p1: { phase: 'running', agent: 'idle', memory: 0 }, 'p1~2': { phase: 'running', agent: 'idle', memory: 0 }, 'p1~3': { phase: 'running', agent: 'idle', memory: 0 } } })
+    const fresh = frameOf('p1~3')!
+    const toFresh: unknown[] = []
+    Object.defineProperty(fresh, 'contentWindow', { value: { postMessage: (message: unknown) => toFresh.push(message) }, configurable: true })
+    fromPage(fresh, { ready: true })
+    expect(toFresh).toContainEqual({ source: 'sun', ask: 'useStrategy', strategy: null, picks: 'skills' })
+  })
+})

@@ -43,6 +43,8 @@ export type MonitorRequest =
    * can. `data` is `{ ready: true }` or `{ ready: false, reason }`.
    */
   | { kind: 'probe'; id: string; tool: string }
+  /** Whether an alert needs a person now, asked of the decision model before Fire Code notifies (null without one). */
+  | { kind: 'triage'; id: string; context: Record<string, unknown> }
   /**
    * The dashboard's refresh: bring the team's skills and tools down now - the bucket folders and the team
    * repository - rather than at the next timed sync, so a monitor a colleague just added (or deleted) shows.

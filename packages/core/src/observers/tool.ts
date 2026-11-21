@@ -63,6 +63,9 @@ export function auditRow(record: AuditRecord): Record<string, unknown> {
     else if (e.kind === 'turnEnd') {
       row['ending'] = e.ending
       if (e.error !== undefined) row['text'] = e.error
+    } else if (e.kind === 'decision') {
+      row['decision'] = e.outcome
+      row['text'] = `${e.purpose}: ${e.question}${e.probabilities !== undefined ? ` ${JSON.stringify(e.probabilities)}` : ''}`
     } else row['text'] = e.text
     if (e.kind === 'turnStart') {
       row['mode'] = e.mode

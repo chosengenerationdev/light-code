@@ -122,6 +122,11 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
    * tool to say so would produce six tool descriptions differing by a word - see `excel_sheets`.
    */
   'excel_sheets',
+  // Charts and pivot tables: they add sheets and objects to somebody's open workbook, and can delete them.
+  'excel_chart',
+  'excel_pivot_table',
+  // Sets where credentials go and what is trusted (a CA, switching certificate checks off); the user types the secrets.
+  'devops_setup',
   /*
    * Running a macro executes somebody else's VBA as the user: it can rewrite the workbook, write
    * files, or send mail. That is not something a category toggle should ever cover, and the

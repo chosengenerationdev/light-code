@@ -281,15 +281,35 @@ export function describeTlsError(error: unknown): string {
   if (/EPROTO|SSL routines|SSL alert|handshake|TLSV1|BAD_CERTIFICATE/i.test(combined)) {
     return 'the TLS handshake failed. The gateway may require a client certificate, or may have rejected the one presented.'
   }
-  if (/ECONNREFUSED/i.test(combined)) return 'the connection was refused.'
-  if (/ENOTFOUND|EAI_AGAIN/i.test(combined)) return 'the host could not be resolved.'
-  if (/ECONNRESET|socket hang up/i.test(combined)) {
-    return 'the connection was closed by the server. A gateway that requires a client certificate often does this when none is presented.'
+  /*
+   * Transport failures keep their code in brackets. The agent decides whether a failure is worth
+   * sending again by reading this sentence (`agent/transient.ts`), and the plain-words versions
+   * dropped every code it looks for - so on a slow or flaky office network a reset, a DNS hiccup or
+   * a slow connect ended the reply at once, where other clients quietly tried again (reported).
+   */
+  const code = transportCode(combined)
+  if (/UND_ERR_CONNECT_TIMEOUT|Connect Timeout/i.test(combined)) {
+    return `the connection could not be made in time (${code ?? 'UND_ERR_CONNECT_TIMEOUT'}). The network may be slow or the host unreachable.`
   }
+  if (/ECONNREFUSED/i.test(combined)) return 'the connection was refused (ECONNREFUSED).'
+  if (/ENOTFOUND|EAI_AGAIN/i.test(combined)) return `the host could not be resolved (${code ?? 'ENOTFOUND'}). Check the address, or the network's name lookup.`
+  if (/ECONNRESET|socket hang up/i.test(combined)) {
+    return (
+      `the connection was closed before an answer came (${code ?? 'ECONNRESET'}). On an unreliable network this ` +
+      'passes on a second try; if it happens every time, the gateway may want a client identity that was not presented.'
+    )
+  }
+  if (/ETIMEDOUT/i.test(combined)) return 'the connection timed out (ETIMEDOUT). The network may be slow or the host unreachable.'
 
   // Nothing recognised. Prefer the deepest cause over undici's opaque "fetch failed"
-  // wrapper, which on its own is unactionable.
+  // wrapper, which on its own is unactionable - with its code, for the same reason as above.
   const deepest = chain[chain.length - 1]
   const deepestMessage = deepest instanceof Error ? deepest.message : String(deepest)
-  return message === 'fetch failed' && deepestMessage !== message ? deepestMessage : message
+  const chosen = message === 'fetch failed' && deepestMessage !== message ? deepestMessage : message
+  return code !== undefined && !chosen.includes(code) ? `${chosen} (${code})` : chosen
+}
+
+/** The first transport error code in an error chain's text, such as `ECONNRESET` or `UND_ERR_SOCKET`. */
+function transportCode(combined: string): string | undefined {
+  return /\b(UND_ERR_[A-Z_]+|E(?:CONNRESET|CONNREFUSED|CONNABORTED|TIMEDOUT|NOTFOUND|PIPE|HOSTUNREACH|NETUNREACH|AI_AGAIN))\b/.exec(combined)?.[1]
 }

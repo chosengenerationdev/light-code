@@ -2594,3 +2594,13 @@ input[type='password']:focus {
   background: color-mix(in srgb, var(--lv-amber, #d97706) 12%, transparent);
   color: var(--text, inherit);
 }
+
+/* Settings → Setup: a ticked option under a line of text (export and import dialogs). */
+.check-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+}

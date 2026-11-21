@@ -232,7 +232,9 @@ function extractModelIds(payload: unknown): string[] {
       ids.push(entry)
       continue
     }
-    const record = entry as { id?: unknown; name?: unknown } | null
+    const record = entry as { id?: unknown; name?: unknown; supportedGenerationMethods?: unknown } | null
+    // Gemini lists embedding, image and video models too; only one that can chat belongs in the chooser.
+    if (Array.isArray(record?.supportedGenerationMethods) && !record.supportedGenerationMethods.includes('generateContent')) continue
     // Gemini's `/v1beta/models` uses `name`; OpenAI-compatible uses `id`.
     const id = typeof record?.id === 'string' ? record.id : typeof record?.name === 'string' ? record.name : undefined
     if (id !== undefined) ids.push(id.replace(/^models\//, ''))
@@ -246,7 +248,7 @@ function extractModelIds(payload: unknown): string[] {
  */
 export async function listModels(
   http: HttpClient,
-  profile: Pick<ProviderProfile, 'baseUrl' | 'headers'>,
+  profile: Pick<ProviderProfile, 'baseUrl' | 'headers'> & { wireFormat?: ProviderProfile['wireFormat'] },
   auth: AuthStrategy,
   signal?: AbortSignal,
 ): Promise<ListModelsResult> {
@@ -261,27 +263,43 @@ export async function listModels(
 
   try {
     const tls = await auth.tls?.()
-    const response = await http.request(url, {
-      method: 'GET',
-      headers: { ...authHeaders, ...profile.headers },
-      ...(signal !== undefined ? { signal } : {}),
-      ...(tls !== undefined ? { tls } : {}),
-    })
+    /*
+     * Gemini pages its catalogue (50 a page by default) and newer models are often past the first
+     * page, so a Gemini profile asks for big pages and follows `nextPageToken`. Bounded, because a
+     * server that hands back the same token for ever must not hold the chooser open.
+     */
+    const gemini = profile.wireFormat === 'gemini'
+    const ids: string[] = []
+    const windows: Record<string, number> = {}
+    let pageToken: string | undefined
+    for (let page = 0; page < 10; page += 1) {
+      const query = gemini ? `?pageSize=1000${pageToken !== undefined ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}` : ''
+      const response = await http.request(`${url}${query}`, {
+        method: 'GET',
+        headers: { ...authHeaders, ...profile.headers },
+        ...(signal !== undefined ? { signal } : {}),
+        ...(tls !== undefined ? { tls } : {}),
+      })
 
-    if (response.status === 404) {
-      return { ids: [], warning: `${url} returned 404. This gateway does not publish a model list — type the model id.` }
-    }
-    if (response.status < 200 || response.status >= 300) {
-      return { ids: [], warning: `${url} returned HTTP ${response.status}. Type the model id instead.` }
+      if (response.status === 404) {
+        return { ids: [], warning: `${url} returned 404. This gateway does not publish a model list — type the model id.` }
+      }
+      if (response.status < 200 || response.status >= 300) {
+        return { ids: [], warning: `${url} returned HTTP ${response.status}. Type the model id instead.` }
+      }
+
+      const payload: unknown = await response.json()
+      ids.push(...extractModelIds(payload))
+      Object.assign(windows, extractContextWindows(payload))
+      const next = (payload as { nextPageToken?: unknown } | null)?.nextPageToken
+      if (!gemini || typeof next !== 'string' || next.length === 0 || next === pageToken) break
+      pageToken = next
     }
 
-    const payload: unknown = await response.json()
-    const ids = extractModelIds(payload)
     if (ids.length === 0) {
       return { ids: [], warning: `${url} returned no models. Type the model id instead.` }
     }
-    const windows = extractContextWindows(payload)
-    return { ids, ...(Object.keys(windows).length > 0 ? { windows } : {}) }
+    return { ids: [...new Set(ids)].sort(), ...(Object.keys(windows).length > 0 ? { windows } : {}) }
   } catch (error) {
     return { ids: [], warning: `Could not reach ${url}: ${describeTlsError(error)}` }
   }

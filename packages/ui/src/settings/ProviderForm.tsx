@@ -186,7 +186,9 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
    */
   const maybeAutoFetchModels = (): void => {
     const url = baseUrl.trim()
-    if (url === lastFetchedUrl || url.length === 0) return
+    // Keyed on the key too: a list that failed for a mistyped key is fetched again once it is corrected.
+    const fetchKey = `${url}|${apiKey.trim()}`
+    if (fetchKey === lastFetchedUrl || url.length === 0) return
     try {
       const parsed = new URL(url)
       if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return
@@ -209,7 +211,7 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
         tokenCommand.command.filter((part: string) => part.trim().length > 0).length > 0)
     if (!hasCredential) return
 
-    setLastFetchedUrl(url)
+    setLastFetchedUrl(fetchKey)
     props.onRequestModels(currentInput())
   }
 

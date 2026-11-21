@@ -27,6 +27,36 @@ export interface HubRuntime {
   label: string
 }
 
+/**
+ * Another codebase's hub - in Fire Code, a JupyterHub codebase beside this one, often a named server of the same
+ * user - whose kernel `hub_run` and `hub_inspect` may use when asked by name (`hub`). Asked for: "can agent in 1st
+ * code base read about the libraries or files in 2nd named server?" Files were already readable (`hub_browse`);
+ * this lets the libraries be inspected where they are installed. Its kernel is this session's own, started on
+ * first use and shut down with the session, so nothing here touches that codebase's chat or its kernel.
+ */
+export interface OtherHub {
+  /** The codebase's name, as Fire Code lists it. */
+  name: string
+  label: string
+  kernel: KernelSession
+}
+
+/** Where a run goes: this codebase's hub, or another one named by `hub`. */
+type Target = { kind: 'own'; runtime: HubRuntime; label: string; kernel: KernelSession } | { kind: 'other'; hub: OtherHub; label: string; kernel: KernelSession }
+
+function targetFor(runtime: HubRuntime | undefined, others: readonly OtherHub[], hub: string | undefined): Target | { error: string } {
+  const names = others.map((other) => `"${other.name}"`).join(', ')
+  if (hub === undefined || hub.trim().length === 0) {
+    if (runtime !== undefined) return { kind: 'own', runtime, label: runtime.label, kernel: runtime.kernel }
+    return { error: `Say which hub with "hub": ${names}.` }
+  }
+  const wanted = hub.trim().toLowerCase()
+  const other = others.find((candidate) => candidate.name.toLowerCase() === wanted)
+  if (other !== undefined) return { kind: 'other', hub: other, label: other.label, kernel: other.kernel }
+  if (runtime !== undefined && (wanted === 'this' || wanted === 'own')) return { kind: 'own', runtime, label: runtime.label, kernel: runtime.kernel }
+  return { error: `No hub called "${hub}". ${others.length > 0 ? `Other codebases' hubs: ${names}.` : 'There are no other JupyterHub codebases.'}${runtime !== undefined ? ' Leave hub out for this codebase\'s own.' : ''}` }
+}
+
 const RUN_DEFAULT_SECONDS = 300
 const SCRIPT_PREVIEW_CHARS = 6000
 
@@ -36,7 +66,11 @@ const runSchema = z.object({
   args: z.array(z.string()).optional().describe('Command-line arguments for file (sys.argv[1:]).'),
   shell: z.string().optional().describe('A shell command to run on the hub server, from the folder given in cwd or the top folder.'),
   cwd: z.string().optional().describe('For shell: a workspace folder (inside the hub folders) to run it in.'),
-  timeoutSeconds: z.number().int().min(5).max(3600).optional(),
+  timeoutSeconds: z.number().int().min(5).max(3600).optional().describe('How long the run may take before it is interrupted.'),
+  hub: z
+    .string()
+    .optional()
+    .describe("Run on another codebase's JupyterHub server instead, by its codebase name (listed in this tool's description). There, cwd is a folder on that server, and file is not available - use shell, e.g. python path/to/script.py."),
 })
 type RunParams = z.infer<typeof runSchema>
 
@@ -44,11 +78,12 @@ const inspectSchema = z.object({
   name: z.string().optional().describe('A module, class or function on the hub, e.g. "pandas.read_csv" or "acme_risk.pricing".'),
   source: z.boolean().optional().describe('Include the source code when available.'),
   packages: z.string().optional().describe('Instead of name: list installed packages whose name contains this ("" for all).'),
+  hub: z.string().optional().describe("Look on another codebase's JupyterHub server instead, by its codebase name (listed in this tool's description)."),
 })
 type InspectParams = z.infer<typeof inspectSchema>
 
 const syncSchema = z.object({
-  action: z.enum(['pull', 'push', 'status', 'hub_version', 'use_hub_version']),
+  action: z.enum(['pull', 'push', 'status', 'hub_version', 'use_hub_version']).describe("pull: fetch the hub's changes. push: save local changes to the hub. status: what differs. hub_version: show the hub's copy of a conflicting file. use_hub_version: replace the local copy with it."),
   path: z.string().optional().describe('For push, hub_version, use_hub_version: one workspace file. push without it saves every local change.'),
 })
 type SyncParams = z.infer<typeof syncSchema>
@@ -119,9 +154,30 @@ async function plan(
   return { ok: true, code, shown: params.shell ?? '', where: `the hub, in ${folder || 'the top folder'}` }
 }
 
-function describeRun(runtime: HubRuntime, output: RunOutput, where: string): string {
+/** The code for another codebase's hub: code as given, shell from a folder on that server. No local files there. */
+function planElsewhere(params: RunParams): { ok: true; code: string; shown: string; where: string } | { ok: false; message: string } {
+  const given = [params.code, params.file, params.shell].filter((v) => v !== undefined).length
+  if (given !== 1) return { ok: false, message: 'Give exactly one of code or shell.' }
+  if (params.file !== undefined) {
+    return { ok: false, message: "file runs a script from this workspace; on another codebase's hub use shell instead, e.g. python path/to/script.py with cwd." }
+  }
+  if (params.code !== undefined) return { ok: true, code: params.code, shown: params.code, where: 'its kernel' }
+  const folder = (params.cwd ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  if (folder.split('/').includes('..')) return { ok: false, message: 'cwd must be a folder on that server, without "..".' }
+  const code = [
+    'import os as _lc_os, subprocess as _lc_sp, sys as _lc_sys',
+    `_lc_home = globals().setdefault('_lc_home', _lc_os.getcwd())`,
+    `_lc_r = _lc_sp.run(${py(params.shell)}, shell=True, cwd=_lc_os.path.join(_lc_home, ${py(folder)}), capture_output=True, text=True)`,
+    'print(_lc_r.stdout, end="")',
+    'print(_lc_r.stderr, end="", file=_lc_sys.stderr)',
+    'print(f"\\n[exit code {_lc_r.returncode}]")',
+  ].join('\n')
+  return { ok: true, code, shown: params.shell ?? '', where: folder || 'the top folder' }
+}
+
+function describeRun(label: string, output: RunOutput, where: string): string {
   const parts: string[] = []
-  if (output.freshKernel) parts.push(`(A new ${output.kernelName} kernel was started on ${runtime.label}; variables from earlier runs are gone.)`)
+  if (output.freshKernel) parts.push(`(A new ${output.kernelName} kernel was started on ${label}; variables from earlier runs are gone.)`)
   parts.push(output.text.trim().length > 0 ? output.text.replace(/\s+$/, '') : '(no output)')
   if (output.error !== undefined) parts.push(`${output.error.name}: ${output.error.value}\n${output.error.traceback}`.trim())
   if (output.timedOut === true) parts.push('Stopped: it ran past the time limit, so the kernel was interrupted. Raise timeoutSeconds if it needs longer.')
@@ -143,41 +199,65 @@ export function describePull(result: PullResult): string {
   return lines.join('\n')
 }
 
-export function createHubTools(runtime: HubRuntime): Tool[] {
+export function createHubTools(runtime: HubRuntime | undefined, others: readonly OtherHub[] = []): Tool[] {
+  const elsewhere =
+    others.length === 0
+      ? ''
+      : ` Other codebases' JupyterHub servers, by "hub": ${others.map((other) => `"${other.name}" (${other.label})`).join(', ')}.`
+  const here = runtime !== undefined ? `ON THE JUPYTERHUB SERVER (${runtime.label})` : 'ON ANOTHER CODEBASE\'S JUPYTERHUB SERVER (name it with "hub")'
   const runTool: Tool<RunParams> = {
     name: 'hub_run',
     group: 'command',
     description:
-      `Run Python, a script or a shell command ON THE JUPYTERHUB SERVER (${runtime.label}), in its environment - use this, ` +
+      `Run Python, a script or a shell command ${here}, in its environment - use this, ` +
       'not execute_command, for anything that needs the hub\'s libraries or data. `code` runs in one kernel kept for the ' +
       'session (variables persist); `file` runs a workspace script from its own folder on the hub (saved there first if ' +
-      'edited); `shell` runs a command on the hub. Files it writes on the hub are fetched into the workspace afterwards.',
+      'edited); `shell` runs a command on the hub. Files it writes on the hub are fetched into the workspace afterwards.' +
+      elsewhere,
     parametersSchema: runSchema,
     async preview(params, context) {
-      const planned = await plan(runtime, context, params)
+      const target = targetFor(runtime, others, params.hub)
+      if ('error' in target) return { kind: 'text', text: target.error }
+      const planned = target.kind === 'own' ? await plan(target.runtime, context, params) : planElsewhere(params)
       if (!planned.ok) return { kind: 'text', text: planned.message }
-      return { kind: 'command', command: planned.shown, cwd: `JupyterHub: ${planned.where}` }
+      const where = target.kind === 'own' ? planned.where : `${target.label}, ${planned.where} (codebase "${target.hub.name}")`
+      return { kind: 'command', command: planned.shown, cwd: `JupyterHub: ${where}` }
     },
     async execute(params, context): Promise<ToolResult> {
-      const planned = await plan(runtime, context, params)
+      const target = targetFor(runtime, others, params.hub)
+      if ('error' in target) return { content: target.error, isError: true }
+      if (target.kind === 'other') {
+        const planned = planElsewhere(params)
+        if (!planned.ok) return { content: planned.message, isError: true }
+        const output = await target.kernel.run(planned.code, {
+          timeoutMs: (params.timeoutSeconds ?? RUN_DEFAULT_SECONDS) * 1000,
+          ...(context.signal !== undefined ? { signal: context.signal } : {}),
+        })
+        return {
+          content: describeRun(target.label, output, `${target.label}, ${planned.where}`),
+          ...(output.error !== undefined || output.timedOut === true ? { isError: true } : {}),
+        }
+      }
+      const own = target.runtime
+      const planned = await plan(own, context, params)
       if (!planned.ok) return { content: planned.message, isError: true }
       const notes: string[] = []
       if (planned.local !== undefined) {
-        const saved = await runtime.mirror.push(planned.local, context.signal)
+        const saved = await own.mirror.push(planned.local, context.signal)
         if (!saved.saved) return { content: `Not run: ${params.file ?? ''} could not be saved to the hub first - ${saved.message}`, isError: true }
       }
-      const output = await runtime.kernel.run(planned.code, {
+      const output = await own.kernel.run(planned.code, {
         timeoutMs: (params.timeoutSeconds ?? RUN_DEFAULT_SECONDS) * 1000,
         ...(context.signal !== undefined ? { signal: context.signal } : {}),
       })
       try {
-        const pulled = await runtime.mirror.pull(context.signal)
+        const pulled = await own.mirror.pull(context.signal)
         if (pulled.fetched.length + pulled.removed.length + pulled.conflicts.length > 0) notes.push(describePull(pulled))
       } catch (error) {
         notes.push(`(Could not fetch changes from the hub afterwards: ${error instanceof Error ? error.message : String(error)})`)
       }
       return {
-        content: [describeRun(runtime, output, planned.where), ...notes].join('\n\n'),
+        content: [describeRun(own.label, output, planned.where), ...notes].join('\n\n'),
         ...(output.error !== undefined || output.timedOut === true ? { isError: true } : {}),
       }
     },
@@ -189,13 +269,19 @@ export function createHubTools(runtime: HubRuntime): Tool[] {
     description:
       'Look up a library that exists on the JupyterHub server - its signature, documentation, members and (with source) ' +
       'its code - or list the packages installed there. Use it instead of guessing at an API the local machine cannot see. ' +
-      'Importing a module runs its top-level code, which is why this asks first.',
+      'Importing a module runs its top-level code, which is why this asks first.' +
+      elsewhere,
     parametersSchema: inspectSchema,
     async preview(params) {
-      if (params.packages !== undefined) return { kind: 'command', command: `list installed packages matching ${py(params.packages)}`, cwd: 'JupyterHub kernel' }
-      return { kind: 'command', command: `inspect ${params.name ?? '?'}${params.source === true ? ' (with source)' : ''}`, cwd: 'JupyterHub kernel (imports the module)' }
+      const target = targetFor(runtime, others, params.hub)
+      if ('error' in target) return { kind: 'text', text: target.error }
+      const where = target.kind === 'own' ? 'JupyterHub kernel' : `JupyterHub kernel on ${target.label} (codebase "${target.hub.name}")`
+      if (params.packages !== undefined) return { kind: 'command', command: `list installed packages matching ${py(params.packages)}`, cwd: where }
+      return { kind: 'command', command: `inspect ${params.name ?? '?'}${params.source === true ? ' (with source)' : ''}`, cwd: `${where} (imports the module)` }
     },
     async execute(params, context): Promise<ToolResult> {
+      const target = targetFor(runtime, others, params.hub)
+      if ('error' in target) return { content: target.error, isError: true }
       let code: string
       if (params.packages !== undefined) {
         code = [
@@ -209,10 +295,14 @@ export function createHubTools(runtime: HubRuntime): Tool[] {
       } else {
         return { content: 'Give name (a dotted module path, e.g. "pkg.module.func") or packages.', isError: true }
       }
-      const output = await runtime.kernel.run(code, { timeoutMs: 120_000, ...(context.signal !== undefined ? { signal: context.signal } : {}) })
-      return { content: describeRun(runtime, output, 'the hub kernel'), ...(output.error !== undefined ? { isError: true } : {}) }
+      const output = await target.kernel.run(code, { timeoutMs: 120_000, ...(context.signal !== undefined ? { signal: context.signal } : {}) })
+      const where = target.kind === 'own' ? 'the hub kernel' : `the kernel on ${target.label}`
+      return { content: describeRun(target.label, output, where), ...(output.error !== undefined ? { isError: true } : {}) }
     },
   }
+
+  // Without a hub of its own, only the two tools that can go to another codebase's hub.
+  if (runtime === undefined) return [runTool, inspectTool]
 
   const syncTool: Tool<SyncParams> = {
     name: 'hub_sync',

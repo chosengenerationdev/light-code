@@ -1,4 +1,5 @@
 import { App } from '@light-code/ui'
+import { AppInbox } from './appInbox.js'
 import { createRoot } from 'react-dom/client'
 import { HttpTransport, type StatusLevel } from './transport.js'
 
@@ -229,6 +230,8 @@ if (embedder !== undefined) {
       op?: unknown
       message?: unknown
       text?: unknown
+      strategy?: unknown
+      picks?: unknown
       appearance?: { theme?: unknown; accent?: unknown; own?: unknown }
       picked?: { purpose?: unknown; path?: unknown }
       saved?: { requestId?: unknown; path?: unknown; error?: unknown }
@@ -247,6 +250,27 @@ if (embedder !== undefined) {
       transport.redeliver({ type: 'pathPicked', purpose: data.picked.purpose, path: data.picked.path })
       return
     }
+    /*
+     * Fire Code's + : the tab being left is asked for the strategy it uses, and the new tab is handed it once its page is
+     * up (asked for: "clicking + didnt carry the selected strategy"). Each tab is its own agent, so the strategy travels
+     * through the window rather than through a file.
+     */
+    if (data.ask === 'shareStrategy') {
+      const off = transport.onMessage((message) => {
+        const incoming = message as { type?: string; active?: unknown; skillToolPicks?: unknown }
+        if (incoming.type !== 'strategies') return
+        off()
+        window.parent.postMessage({ source: 'light-code', carryStrategy: incoming.active ?? null, carryPicks: incoming.skillToolPicks ?? null }, embedder)
+      })
+      transport.post({ type: 'requestStrategies' })
+      return
+    }
+    if (data.ask === 'useStrategy') {
+      if (data.strategy !== null && typeof data.strategy === 'object') transport.post({ type: 'useStrategy', strategy: data.strategy })
+      // The decision model's skill-and-tool picks, if the chat it came from had them on.
+      if (data.picks === 'skills' || data.picks === 'tools' || data.picks === 'both') transport.post({ type: 'setChatSkillToolPicks', value: data.picks })
+      return
+    }
     // Fire Code's commit dialog asks this codebase's agent for a message; the answer goes back below.
     if (data.ask === 'commitMessage') {
       transport.post({ type: 'suggestCommitMessage' })
@@ -257,7 +281,7 @@ if (embedder !== undefined) {
     const nested = typeof data.ask === 'object' && data.ask !== null ? (data.ask as { ask?: unknown; text?: unknown }) : undefined
     const prefill = data.ask === 'prefill' ? data.text : nested?.ask === 'prefill' ? nested.text : undefined
     if (typeof prefill === 'string') {
-      transport.redeliver({ type: 'prefillComposer', text: prefill.slice(0, 20_000) })
+      deliverToApp({ type: 'prefillComposer', text: prefill.slice(0, 20_000) })
       return
     }
     // Fire Code's instructions dialog: the standing instructions are a skill only this host can find.
@@ -284,6 +308,12 @@ if (embedder !== undefined) {
   })
   // Asks for the appearance at once, so it is in hand before the first settings reply arrives.
   window.parent.postMessage({ source: 'light-code', ready: true }, embedder)
+}
+
+/** Messages for the chat app that arrive before it is listening - see `appInbox.ts`. */
+const appInbox = new AppInbox(transport)
+function deliverToApp(message: unknown): void {
+  appInbox.deliver(message)
 }
 
 const BUSY_MESSAGES = new Set(['textChunk', 'reasoningChunk', 'toolCall', 'toolResult', 'chart', 'diagram'])
@@ -337,6 +367,7 @@ transport
   .then(() => {
     // Fire Code: this page has its session, so a fresh link need not reload it.
     if (embedder !== undefined) window.parent.postMessage({ source: 'light-code', connected: true }, embedder)
+    appInbox.openWhenListening()
     createRoot(rootElement).render(<App transport={transport} />)
   })
   .catch((error: unknown) => {

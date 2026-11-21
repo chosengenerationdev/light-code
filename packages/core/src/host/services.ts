@@ -1,3 +1,4 @@
+import type { CodebaseAgentChannel } from '../agents/codebaseAgents.js'
 import type { DiagnosticsProvider } from '../lsp/manager.js'
 import type { ConfigStore } from '../platform/config.js'
 import type { HttpClient } from '../platform/http.js'
@@ -90,6 +91,14 @@ export interface HostUi {
    */
   openFile?(filePath: string): Promise<void>
   /**
+   * Opens a file with the program this machine uses for it - Excel for a workbook, the PDF reader for a
+   * PDF - for the Files panel. Absent where that would happen on somebody else's screen (a shared
+   * server), and the panel then offers no Open button.
+   */
+  openWithDefaultApp?(filePath: string): Promise<void>
+  /** Shows a file selected in the system's file manager. Absent where `openWithDefaultApp` is. */
+  revealInFolder?(filePath: string): Promise<void>
+  /**
    * Runs a command where the user can watch it - VS Code's integrated terminal. Used once, for a new branch
    * folder's setup command (`branches.setupCommand`). Absent elsewhere: the command then runs in the
    * background and its result is reported.
@@ -140,10 +149,14 @@ export interface HostUi {
     segment: string,
     limit: number,
     excludeFolders: readonly string[],
-    /** `prefix`: names that start with the segment. With `depth`, only files that many folders down. */
-    mode?: 'contains' | 'prefix',
+    /**
+     * `prefix`: names that start with the segment. With `depth`, only files that many folders down.
+     * `folders`: folders (not files) whose name contains the segment - the `@` picker matching
+     * folder names (`context/mentionSearch.ts`).
+     */
+    mode?: 'contains' | 'prefix' | 'folders',
     depth?: number,
-    /** Another folder to search instead of the workspace: a sibling codebase (`siblings`). */
+    /** Another folder to search instead of the workspace: a sibling codebase, or a folder in it. */
     root?: string,
   ): Promise<string[]>
 }
@@ -161,6 +174,16 @@ export interface WorkspaceState {
 }
 
 export interface HostServices {
+  /**
+   * A shared server (`light-code --server`): one service account for everybody. Tools that set up a person's own
+   * connections (`devops_setup`) are left out there.
+   */
+  sharedServer?: boolean
+  /**
+   * Continue a turn the last run of this chat was cut off in (`agent/resume.ts`). Fire Code sets it when it
+   * starts a chat whose previous process stopped unexpectedly (host flag `--resume-interrupted`).
+   */
+  resumeInterrupted?: boolean
   /**
    * The project's own source, zipped at build time, for "Export source code".
    *
@@ -220,6 +243,11 @@ export interface HostServices {
    * follows the ordinary outside-the-workspace rules.
    */
   siblings?: { name: string; path: string }[]
+  /**
+   * Asking the other codebases' agents, and answering their requests (Fire Code's control channel). With it and
+   * `siblings`, `ask_codebase_agent` exists - see `agents/codebaseAgents.ts`.
+   */
+  codebaseAgents?: CodebaseAgentChannel
   /**
    * This codebase's own short name in Fire Code, so `@tyj:src/main.rs` works in tyj's own chat as it
    * does in every other one. Used for mentions only - it is not another codebase.

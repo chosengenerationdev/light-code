@@ -1,4 +1,5 @@
 import { checkCollector } from '../dataset/checkCollector.js'
+import type { LibraryFs } from '../library/snapshot.js'
 import type { MachineApprovals } from './machineApprovals.js'
 import { redact } from '../logging/redact.js'
 import fs from 'node:fs/promises'
@@ -141,6 +142,13 @@ export interface PythonStatus {
 
 export interface PythonManagerOptions {
   workspaceRoot: string | undefined
+  /**
+   * Told what setting up Python is doing now ("checking for uv", "reading tools in <folder>"), and how long the step
+   * before took - so a chat that takes minutes to get ready says which step is slow.
+   */
+  onProgress?: ((step: string, tookMs?: number) => void) | undefined
+  /** Reads the tool folders all at once (`library/snapshot.ts`); absent, they are read from the disk file by file. */
+  librarySnapshot?: ((dirs: readonly string[]) => Promise<LibraryFs>) | undefined
   /**
    * Lets a Python tool call another tool. Supplied by the host, absent where nobody can approve.
    *
@@ -290,6 +298,16 @@ export class PythonManager {
 
   constructor(private readonly options: PythonManagerOptions) {}
 
+  private progressStep: { step: string; at: number } | undefined
+  /** Reports the step starting now (undefined when done), and how long the one before took. */
+  private progress(step: string | undefined, finished?: string, tookMs?: number): void {
+    const before = this.progressStep
+    if (finished !== undefined && tookMs !== undefined) this.options.onProgress?.(finished, tookMs)
+    else if (before !== undefined) this.options.onProgress?.(before.step, Date.now() - before.at)
+    this.progressStep = step === undefined ? undefined : { step, at: Date.now() }
+    if (step !== undefined) this.options.onProgress?.(step)
+  }
+
   /**
    * Applies config and brings the environment up if it is on.
    *
@@ -413,7 +431,10 @@ export class PythonManager {
     this.extraIndexUrls = config.extraIndexUrls ?? []
     this.offline = config.offline === true
 
-    if (this.uv === undefined) this.uv = await detectUv(config.uvPath)
+    if (this.uv === undefined) {
+      this.progress('checking for uv')
+      this.uv = await detectUv(config.uvPath)
+    }
 
     /*
      * No uv is no longer the end of it.
@@ -425,7 +446,9 @@ export class PythonManager {
      * right trade there and the wrong one when the environment is ours.
      */
     if (this.uv === undefined) {
+      this.progress('finding a Python interpreter')
       await this.startWithoutUv(config, this.options.workspaceRoot)
+      this.progress(undefined)
       return
     }
 
@@ -442,6 +465,7 @@ export class PythonManager {
        * of ours as the fallback.
        */
       let interpreter: string
+      this.progress('checking the virtual environment')
       if (config.venvPath !== undefined && config.venvPath.trim().length > 0) {
         this.venvPath = config.venvPath.trim()
         this.venvSource = 'configured'
@@ -482,6 +506,7 @@ export class PythonManager {
         ...(this.readCredential() !== undefined ? { readCredential: this.readCredential() } : {}),
       })
       await this.refresh()
+      this.progress(undefined)
       this.ready = true
       this.detail =
         this.venvSource === 'workspace'
@@ -590,12 +615,16 @@ export class PythonManager {
 
   async refresh(): Promise<void> {
     if (!this.enabled || this.toolsDir.length === 0) return
+    const dirs = this.toolDirectories()
+    const io = this.options.librarySnapshot === undefined ? undefined : await this.options.librarySnapshot(dirs).catch(() => undefined)
     const loaded = await loadRegistries(
-      this.toolDirectories(),
+      dirs,
       this.worker,
       this.options.logger,
       this.declinedTools,
       this.options.machineApprovals,
+      (dir, tookMs) => (tookMs === undefined ? this.progress(`reading tools in ${dir}`) : this.progress(undefined, `reading tools in ${dir}`, tookMs)),
+      io,
     )
     if (loaded.approvedElsewhere !== undefined) this.options.onApprovedElsewhere?.(loaded.approvedElsewhere)
     this.registered = loaded.tools

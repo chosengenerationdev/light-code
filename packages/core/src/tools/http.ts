@@ -32,7 +32,7 @@ import type { Tool, ToolExecutionContext, ToolPreview, ToolResult } from './type
  */
 
 const schema = z.object({
-  method: z.enum(['GET', 'POST']).default('GET'),
+  method: z.enum(['GET', 'POST']).default('GET').describe('GET to read, POST to send a body.'),
   url: z.string().min(1).describe('The full URL, e.g. https://<host>/v1/items?limit=10. Its host must be one the user named in this chat.'),
   headers: z
     .record(z.string(), z.string())
@@ -48,7 +48,8 @@ const schema = z.object({
       ),
       profile: z.string().optional().describe('profile: the provider profile\'s name or id, as in Settings → Providers.'),
     })
-    .optional(),
+    .optional()
+    .describe('How to sign in, when the API needs more than headers.'),
   tls: z
     .object({
       caFile: z.string().optional().describe('A CA certificate file (PEM) to trust, beyond the global ones.'),

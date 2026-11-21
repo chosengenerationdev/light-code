@@ -24,16 +24,17 @@ afterEach(() => {
 
 function setup(): { posted: Record<string, unknown>[]; deliver: (message: unknown) => void } {
   const posted: Record<string, unknown>[] = []
-  let handler: ((message: unknown) => void) | undefined
+  // Several listeners, as a real transport has: the instructions box listens for its own file candidates.
+  const handlers = new Set<(message: unknown) => void>()
   const transport = {
     post: (message: Record<string, unknown>) => void posted.push(message),
     onMessage: (h: (message: unknown) => void) => {
-      handler = h
-      return () => (handler = undefined)
+      handlers.add(h)
+      return () => void handlers.delete(h)
     },
   }
   act(() => root.render(<StrategyEditor transport={transport as never} onClose={() => undefined} />))
-  return { posted, deliver: (message) => act(() => handler?.(message)) }
+  return { posted, deliver: (message) => act(() => handlers.forEach((h) => h(message))) }
 }
 
 const roles = [
@@ -114,7 +115,7 @@ describe('the Strategy window', () => {
     // Programmer -> Tester
     press(boxes()[0]!)
     act(() => button('Connect to').click())
-    expect(container.textContent).toContain('Now click the step it should lead to')
+    expect(container.textContent).toContain('Now click the step or box it should lead to')
     press(boxes()[1]!)
     // Tester -> Programmer: the same connector becomes a back-and-forth
     press(boxes()[1]!)
@@ -149,5 +150,56 @@ describe('the Strategy window', () => {
     const saved = posted.find((m) => m['type'] === 'saveStrategy') as { strategy: { edges: { requires?: string[] }[] } }
     expect(saved.strategy.edges[0]!.requires).toEqual(['Changed files', 'Tests run'])
   })
-})
 
+  it('connects a box to a step - followed once every step inside has answered - and never makes it a back-and-forth', () => {
+    const { posted, deliver } = setup()
+    deliver({ type: 'strategies', library: [], progress: {}, problems: [], roles, processes: [] })
+    const button = (text: string): HTMLButtonElement => [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith(text)) as HTMLButtonElement
+    act(() => button('Programmer').click())
+    act(() => button('▭ Add a box').click())
+    expect(container.textContent).toContain('Run as a group')
+    // The box is selected: Connect to…, then the programmer step.
+    act(() => button('Connect to').click())
+    const steps = [...container.querySelectorAll('svg rect[width="168"]')]
+    const press = (element: Element): void => act(() => void element.dispatchEvent(new Event('pointerdown', { bubbles: true })))
+    press(steps[0]!)
+    expect(container.textContent).toContain('Followed once every step in ▭ Group has answered.')
+    expect(container.textContent).not.toContain('Back and forth')
+    // Drawn again the other way, from the step: still one way, the existing connector selected.
+    press(steps[0]!)
+    act(() => button('Connect to').click())
+    const box = [...container.querySelectorAll('svg rect')].find((r) => r.getAttribute('rx') === '12')!
+    press(box)
+    act(() => button('Save and use').click())
+    const saved = posted.find((m) => m['type'] === 'saveStrategy') as { strategy: { edges: { from: string; to: string; twoWay?: boolean }[]; groups: { id: string; kind: string }[] } }
+    expect(saved.strategy.groups[0]!.kind).toBe('together')
+    expect(saved.strategy.edges).toHaveLength(1)
+    expect(saved.strategy.edges[0]!.from).toBe(saved.strategy.groups[0]!.id)
+    expect(saved.strategy.edges[0]!.twoWay).toBeUndefined()
+  })
+
+  it("offers workspace files on @ in a step's instructions, and lists the ones named", () => {
+    const { posted, deliver } = setup()
+    deliver({ type: 'strategies', library: [], progress: {}, problems: [], roles, processes: [] })
+    act(() => ([...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Programmer')) as HTMLButtonElement).click())
+    const box = container.querySelector('#strategy-node-instructions') as HTMLTextAreaElement
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    act(() => {
+      setter.call(box, 'follow @docs')
+      box.setSelectionRange(12, 12)
+      box.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        expect(posted).toContainEqual({ type: 'requestMentionCandidates', query: 'docs' })
+        deliver({ type: 'mentionCandidates', query: 'docs', paths: ['docs/testing.md'] })
+        const option = container.querySelector('[role="option"]') as HTMLButtonElement
+        expect(option.textContent).toBe('docs/testing.md')
+        act(() => void option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+        expect((container.querySelector('#strategy-node-instructions') as HTMLTextAreaElement).value).toBe('follow @docs/testing.md ')
+        expect(container.textContent).toContain('@docs/testing.md')
+        resolve()
+      }, 200)
+    })
+  })
+})

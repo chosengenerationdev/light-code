@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createServer } from './server.js'
 import type { LinuxSettings, Machine } from './settings.js'
-import { ensureLocalKey, installCommand, KEY_NAME, setUpKey } from './keySetup.js'
+import { ensureLocalKey, installCommand, KEY_NAME, readableKeyPair, setUpKey } from './keySetup.js'
 import { localPathFor, SshPool } from './ssh.js'
 
 /**
@@ -119,8 +119,8 @@ async function startServer(hostKey: string, options: { keys?: boolean } = {}): P
   return { port, commands, logins, authorized, close: () => new Promise((resolve) => server.close(() => resolve())) }
 }
 
-const keyA = utils.generateKeyPairSync('ed25519').private
-const keyB = utils.generateKeyPairSync('ed25519').private
+const keyA = readableKeyPair().private
+const keyB = readableKeyPair().private
 
 let dir: string
 let host: FakeHost

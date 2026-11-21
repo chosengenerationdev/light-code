@@ -54,12 +54,27 @@ export function ensureLocalKey(folder: string): { privatePath: string; publicLin
     return { privatePath, publicLine: line, created: false }
   }
   const comment = `light-code@${(os.hostname() || 'pc').replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 60)}`
-  const pair = utils.generateKeyPairSync('ed25519', { comment })
+  const pair = readableKeyPair(comment)
   fs.mkdirSync(folder, { recursive: true })
   // `wx`: never over a key that appeared meanwhile.
   fs.writeFileSync(privatePath, pair.private, { flag: 'wx', mode: 0o600 })
   fs.writeFileSync(publicPath, `${pair.public}\n`, { flag: 'wx', mode: 0o644 })
   return { privatePath, publicLine: pair.public.trim(), created: true }
+}
+
+/**
+ * A new ed25519 pair whose private key ssh2 can read back.
+ *
+ * ssh2 1.17's generator writes an OpenSSH private key its own parser then refuses ("Malformed OpenSSH private key")
+ * about 4 times in 1,000 - measured, 12 of 3,000. Kept, such a key would be installed on the server and then fail
+ * every sign-in for good, since a key on disk is reused rather than made again. So each is read back first.
+ */
+export function readableKeyPair(comment?: string): { private: string; public: string } {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const pair = utils.generateKeyPairSync('ed25519', comment !== undefined ? { comment } : undefined)
+    if (!(utils.parseKey(pair.private) instanceof Error)) return pair
+  }
+  throw new SshError('Could not make a readable SSH key. Try again, or sign in with Pageant.')
 }
 
 /** The one command run on the server: the key appended once, with the permissions sshd requires. */

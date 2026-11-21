@@ -114,6 +114,9 @@ pub struct LaunchSpec {
     pub path: Option<String>,
     /// An extra chat: the codebase's first chat runs its schedules, so a job runs once.
     pub no_schedules: bool,
+    /// The last run of this chat stopped unexpectedly: the host continues the turn it was cut off in
+    /// (`--resume-interrupted`, core's `agent/resume.ts`).
+    pub resume_interrupted: bool,
     /// The other codebases, by mention name: readable, and `@name:path` in the composer.
     pub siblings: Vec<(String, String)>,
     /// The other codebases that are JupyterHub folders, by mention name, with their settings files:
@@ -190,6 +193,9 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
     if spec.no_schedules {
         command.arg("--no-schedules");
     }
+    if spec.resume_interrupted {
+        command.arg("--resume-interrupted");
+    }
     if spec.monitoring {
         command.arg("--monitoring");
     }
@@ -225,6 +231,12 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
     }
     if let Some(rg) = &spec.ripgrep {
         command.env("LIGHT_CODE_RIPGREP", rg);
+    }
+    // More of Node's background threads (file reads and name lookups share 4 by default, and one slow network path can
+    // hold them all - reported as a chat taking minutes to load its skills and Python tools). Kept if already set.
+    let pool_set = std::env::var_os("UV_THREADPOOL_SIZE").is_some() || spec.env.iter().any(|(name, _)| name.eq_ignore_ascii_case("UV_THREADPOOL_SIZE"));
+    if !pool_set {
+        command.env("UV_THREADPOOL_SIZE", "32");
     }
 
     let mut child = command.spawn().map_err(|e| {
@@ -393,4 +405,124 @@ fn job_memory(job: HANDLE) -> u64 {
         }
     }
     total
+}
+
+/// How many crashed runs' logs are kept per chat. Each is one run, so this is plenty to compare.
+const CRASH_LOGS_KEPT: usize = 10;
+
+/// Keeps a crashed run's log under its own name, beside the live one.
+///
+/// Reported from real use: the agent stopped often and its log showed only startup lines. `open_log`
+/// moves the last run to `host.previous.log` on every start, so after one Restart the crash was in a
+/// file nobody thought to open, and after two it was gone. A copy in `crashes/` survives restarts;
+/// the newest `CRASH_LOGS_KEPT` are kept.
+pub fn keep_crash_log(log_file: &std::path::Path) -> Option<PathBuf> {
+    let dir = log_file.parent()?.join("crashes");
+    fs::create_dir_all(&dir).ok()?;
+    let target = dir.join(format!("host-{}.log", utc_stamp(std::time::SystemTime::now())));
+    fs::copy(log_file, &target).ok()?;
+    let mut kept: Vec<PathBuf> = fs::read_dir(&dir)
+        .ok()?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().map(|x| x == "log").unwrap_or(false))
+        .collect();
+    // The stamp sorts as text, oldest first.
+    kept.sort();
+    let excess = kept.len().saturating_sub(CRASH_LOGS_KEPT);
+    for old in kept.into_iter().take(excess) {
+        let _ = fs::remove_file(old);
+    }
+    Some(target)
+}
+
+/// A Node diagnostic report written in the last two minutes, if any: the host asks Node for one on a
+/// fatal error (`crashDiagnostics.ts`), and an out-of-memory stop leaves nothing else.
+pub fn recent_crash_report(data_dir: &std::path::Path) -> Option<PathBuf> {
+    let dir = data_dir.join("crash-reports");
+    let now = std::time::SystemTime::now();
+    fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let modified = e.metadata().ok()?.modified().ok()?;
+            let age = now.duration_since(modified).unwrap_or_default();
+            (age.as_secs() <= 120).then(|| (modified, e.path()))
+        })
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, path)| path)
+}
+
+/// The exit code in words. Windows reports a native crash as an NTSTATUS, which reads as a large
+/// negative number and says nothing to anybody.
+pub fn describe_exit(code: Option<i32>) -> String {
+    match code {
+        None => "It ended without an exit code: something outside it ended the process (for example antivirus or Task Manager).".into(),
+        Some(0) => "It exited normally (code 0) without being asked to stop.".into(),
+        Some(1) => "It stopped with an error (code 1); the lines below should name it.".into(),
+        Some(3) | Some(134) => "It aborted (code 3/134) - usually Node running out of memory; look for \"heap out of memory\" below.".into(),
+        Some(c) => match c as u32 {
+            0xC000_0409 => "It aborted (0xC0000409) - usually Node running out of memory; look for \"heap out of memory\" below.".into(),
+            0xC000_0005 => "It crashed in native code (0xC0000005, access violation) - not an error Light Code raised.".into(),
+            0xC000_00FD => "It ran out of stack (0xC00000FD, stack overflow).".into(),
+            0xC000_0017 | 0xC000_012D => "Windows could not give it more memory (out of memory / commit limit).".into(),
+            0xC000_013A => "It was ended by Ctrl+C or a console close (0xC000013A).".into(),
+            0x4001_0004 => "It was ended by Windows logging off or shutting down (0x40010004).".into(),
+            1..=255 => format!("It exited with code {c}."),
+            u => format!("It ended with code 0x{u:08X}."),
+        },
+    }
+}
+
+/// `YYYYMMDD-HHMMSS` in UTC, from the clock alone (no date crate on the pinned toolchain).
+fn utc_stamp(at: std::time::SystemTime) -> String {
+    let secs = at.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let (days, rest) = ((secs / 86_400) as i64, secs % 86_400);
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}{month:02}{day:02}-{:02}{:02}{:02}", rest / 3600, rest % 3600 / 60, rest % 60)
+}
+
+#[cfg(test)]
+mod crash_tests {
+    use super::*;
+
+    #[test]
+    fn stamps_are_utc_dates() {
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_793_966_400 + 3_723);
+        assert_eq!(utc_stamp(at), "20261106-130203");
+        assert_eq!(utc_stamp(std::time::UNIX_EPOCH), "19700101-000000");
+    }
+
+    #[test]
+    fn exit_codes_are_named() {
+        assert!(describe_exit(Some(0xC000_0409u32 as i32)).contains("out of memory"));
+        assert!(describe_exit(Some(0xC000_0005u32 as i32)).contains("access violation"));
+        assert!(describe_exit(None).contains("outside"));
+        assert_eq!(describe_exit(Some(7)), "It exited with code 7.");
+    }
+
+    #[test]
+    fn a_crash_log_survives_restarts_and_only_the_newest_are_kept() {
+        let dir = std::env::temp_dir().join(format!("fire-crash-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("crashes")).unwrap();
+        for i in 0..CRASH_LOGS_KEPT + 3 {
+            fs::write(dir.join("crashes").join(format!("host-20000101-0000{i:02}.log")), "old").unwrap();
+        }
+        let log = dir.join("host.log");
+        fs::write(&log, "FATAL ERROR: heap out of memory").unwrap();
+        let kept = keep_crash_log(&log).unwrap();
+        assert_eq!(fs::read_to_string(&kept).unwrap(), "FATAL ERROR: heap out of memory");
+        assert_eq!(fs::read_dir(dir.join("crashes")).unwrap().count(), CRASH_LOGS_KEPT);
+        assert!(kept.exists(), "the newest is never the one pruned");
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

@@ -99,9 +99,9 @@ describe('the wiring', () => {
    * whether it was inside a tag between chunks, which is the entire job.
    */
   it('keeps one splitter for the whole stream', () => {
-    const uses = openai.match(/new ThinkTagSplitter\(\)/g) ?? []
+    const uses = openai.match(/new ThinkTagSplitter\(/g) ?? []
     expect(uses).toHaveLength(1)
-    const constructed = openai.indexOf('new ThinkTagSplitter()')
+    const constructed = openai.indexOf('new ThinkTagSplitter(')
     const consumed = openai.indexOf('thinking.push(')
     expect(constructed).toBeLessThan(consumed)
   })

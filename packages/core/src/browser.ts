@@ -18,6 +18,8 @@ export {
   type MessageReaction,
   type Reaction,
 } from './agent/feedback.js'
+// Grey suggestions while typing: what Tab takes, and how little is typed before asking.
+export { nextWord, TYPE_AHEAD_MIN_CHARS } from './agent/typeAhead.js'
 
 export type { WireFormat, Auth, ProviderProfile } from './providers/types.js'
 export type { ToolGroup, ToolPreview } from './tools/types.js'
@@ -171,12 +173,14 @@ export type { Schedule, ScheduleTrigger, Schedules, ScheduleRun } from './schedu
 export { riskyGroupsIn } from './schedule/types.js'
 export { describeTrigger, describeNextRun, nextFireTime, isDue } from './schedule/timing.js'
 export type { AddonPageView, AddonView } from './agent/protocol.js'
+export type { DecisionModelSettings, DecisionTestResult } from './agent/protocol.js'
 export type { AddonField, AddonPage } from './addons/page.js'
 export { cleanAddonValues, isShown } from './addons/page.js'
 export type { ScheduleToolInfo, SchedulerStatus } from './agent/protocol.js'
 export type { IndexRenamesMessage, ProjectMessage, ProjectStampEntry, ProjectStampMessage } from './agent/protocol.js'
 export type { ObserversMessage, StrategiesMessage, TeamMessage, TeamReviewView } from './agent/protocol.js'
-export { DEFAULT_LOOP_ROUNDS, strategyOrder, type Strategy, type StrategyEdge, type StrategyExchange, type StrategyGroup, type StrategyNode, type StrategyProgress } from './strategy/strategy.js'
+export type { AgentWrite, ArtifactEntry, ArtifactInfo, ArtifactKind, ArtifactList } from './artifacts/types.js'
+export { DEFAULT_LOOP_ROUNDS, groupKind, groupName, strategyOrder, type Strategy, type StrategyEdge, type StrategyExchange, type StrategyGroup, type StrategyNode, type StrategyProgress } from './strategy/strategy.js'
 export type { ObserverPanelState } from './observers/hub.js'
 export type { ObserverStatus } from './observers/process.js'
 export { DEFAULT_AUDITOR_INSTRUCTIONS, DEFAULT_GUARD_INSTRUCTIONS, MAX_INSTRUCTIONS } from './observers/prompts.js'

@@ -223,9 +223,11 @@ function renderBlock(block: Block, key: string): ReactElement {
     })
     return (
       // Scrolls rather than squeezing: a table narrower than its content is unreadable, and a
-      // sidebar is narrow by definition.
+      // sidebar is narrow by definition. As wide as its content and no wider: stretched to the
+      // reply's width, a three-column table spanned a wide Fire Code window (reported), while the
+      // text around it already uses the full width.
       <div key={key} className="lc-scroll" style={{ overflowX: 'auto', margin: '6px 0' }}>
-        <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
+        <table style={{ borderCollapse: 'collapse', fontSize: 11, width: 'auto', maxWidth: '100%' }}>
           <thead>
             <tr>
               {block.head.map((heading, index) => (

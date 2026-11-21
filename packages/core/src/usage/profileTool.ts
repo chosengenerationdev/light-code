@@ -15,11 +15,11 @@ import { cleanProfile, type UsageProfile } from './store.js'
 
 const params = z.object({
   displayName: z.string().max(200).optional().describe('The person\'s full name as the tool gave it.'),
-  email: z.string().max(200).optional(),
+  email: z.string().max(200).optional().describe('Work email address.'),
   team: z.string().max(200).optional().describe('Team or desk.'),
-  department: z.string().max(200).optional(),
+  department: z.string().max(200).optional().describe('Department or business unit.'),
   title: z.string().max(200).optional().describe('Job title.'),
-  location: z.string().max(200).optional(),
+  location: z.string().max(200).optional().describe('Office or city.'),
   source: z.string().max(200).optional().describe('The tool the details came from.'),
 })
 

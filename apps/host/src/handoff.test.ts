@@ -106,5 +106,74 @@ describe('a new chat with a handoff', () => {
     expect(entries).toContain('Ship the rounding fix.')
     expect(entries).toContain('> Please fix the rounding in invoice totals.')
     expect(entries).not.toContain('Sure, looking at it.')
+
+    // And it carries on by itself: the panel is told so, and the model is asked to continue from the handoff
+    // with nothing typed (asked for: "after new session started, i had to send a message").
+    expect(done).toMatchObject({ continuing: true })
+    const handedOver = inbox.indexOf(done)
+    await until((message) => message.type === 'done' && inbox.indexOf(message) > handedOver)
+    const firstTurn = requests.filter((body) => !body.includes('handing this work over')).at(-1)!
+    const sent = (JSON.parse(firstTurn) as { messages: { role: string; content: string }[] }).messages
+    expect(sent.filter((m) => m.role === 'user')).toHaveLength(1)
+    expect(sent.find((m) => m.role === 'user')?.content).toContain('# Handoff')
+  }, 60_000)
+})
+
+/*
+ * Asked for: "a checkbox, when enabled it should auto handoff to new session when context limit is hit". With it on
+ * and a chat at its window, the turn stops and the handoff is written and carried on with, nothing pressed.
+ */
+describe('handing off by itself at the context limit', () => {
+  it('starts a new chat from a handoff when the chat is full, and carries on in it', async () => {
+    const { baseUrl, requests } = await standInModel()
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-autohandoff-data-'))
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-autohandoff-ws-'))
+    folders.push(dataDir, workspace)
+    const configFile = path.join(dataDir, 'config.json')
+    await fs.writeFile(
+      configFile,
+      JSON.stringify({
+        // A small, known window, so a long second message fills it.
+        profiles: [{ id: 'local', label: 'Local', wireFormat: 'openai', baseUrl, model: 'stand-in', auth: { type: 'none' }, modelCapabilities: { contextWindow: 6_000 } }],
+        activeProfileId: 'local',
+        autoHandoff: true,
+      }),
+    )
+    running = await startServer({ workspaceRoot: workspace, dataDir, configFile, clientAssets: {}, ripgrepPath: () => undefined, noToken: true, logSink: () => undefined })
+    const url = running.url
+    await fetch(`${url}/api/poll`, { headers: { Origin: url } })
+    const inbox: Message[] = []
+    const post = async (message: object): Promise<void> => {
+      const response = await fetch(`${url}/api/message`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: url }, body: JSON.stringify(message) })
+      expect(response.status).toBe(202)
+    }
+    const until = async (match: (message: Message) => boolean): Promise<Message> => {
+      const deadline = Date.now() + 20_000
+      for (;;) {
+        const found = inbox.find(match)
+        if (found !== undefined) return found
+        if (Date.now() > deadline) throw new Error(`timed out; saw ${inbox.map((m) => (m.type === 'error' ? `error: ${String(m['message'])}` : m.type)).join(', ')}`)
+        const response = await fetch(`${url}/api/poll`, { headers: { Origin: url } })
+        inbox.push(...((await response.json()) as { messages: Message[] }).messages)
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+    }
+
+    await post({ type: 'sendMessage', text: 'Please fix the rounding in invoice totals.' })
+    await until((message) => message.type === 'done')
+    const before = requests.length
+    // Long enough to fill the window: the turn stops before asking the model, and the handoff follows by itself.
+    await post({ type: 'sendMessage', text: `Here is the full log:\n${'2026-11-20 02:00:01 ERROR rounding mismatch on invoice 1042\n'.repeat(500)}` })
+    const done = await until((message) => message.type === 'handoffProgress' && (message.phase === 'done' || message.phase === 'failed'))
+    expect(done, JSON.stringify(done)).toMatchObject({ phase: 'done', continuing: true })
+    // The full chat was never sent as a reply request: the next request was the handoff note itself.
+    expect(requests[before]).toContain('handing this work over')
+    const restored = [...inbox].reverse().find((message) => message.type === 'taskRestored')!
+    expect(JSON.stringify(restored.entries)).toContain('# Handoff')
+
+    // The bar over the message box was told what the chat was getting ready, and ended with nothing left.
+    const startup = inbox.filter((message) => message.type === 'startupProgress') as unknown as { waiting: { label: string }[] }[]
+    expect(startup.some((message) => message.waiting.some((item) => item.label === 'Skills'))).toBe(true)
+    expect(startup.at(-1)?.waiting).toEqual([])
   }, 60_000)
 })

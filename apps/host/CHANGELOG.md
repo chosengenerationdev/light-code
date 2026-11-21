@@ -1,5 +1,130 @@
 # @chosengeneration/light-code
 
+## 0.203.0
+
+- **Fixed: Capture in the web chat failed with "pageId: expected number"** on current chrome-devtools-mcp (1.x). The tab's id is now passed, an open web chat tab is recognised from Chrome's list (it was never found, so a new tab opened each time), and a reply that mentions the test phrase is read correctly. Tested end to end against the real chrome-devtools-mcp 1.13.0 and Chrome. A capture error now shows at once instead of the panel waiting.
+
+## 0.202.0
+
+- **The web chat works with internal sites on any address range.** The rule that refused a web chat (or npx's registry) resolving to a public-looking IP is removed - some organisations' internal sites resolve to ranges that look public. The backend address you approve stays the only one used; the panel shows where npx downloads from.
+
+## 0.201.0
+
+- **Fixed: the web chat panel said the Chrome server's flags were missing when they were there**, if the arguments were typed on one line or in the Command box. The command line is now read the way Windows reads it.
+
+## 0.200.0
+
+- **Fixed: the Node host and Fire Code had no personal folder**, so the Web chat panel did not appear and "only me" skills and tools were not available there. Both work now.
+
+## 0.199.0
+
+- **Choose which Chrome DevTools MCP server belongs to the web chat** (Settings → Agents → Web chat). Only that one is used for it and hidden from the assistant - its tools are replaced by `ask_web_chat` - and any other Chrome server you already use is left exactly as it is.
+
+## 0.198.0
+
+- **The web chat's Chrome DevTools MCP server may run through npx** when npm downloads from your organisation's registry (checked: it must be inside the network) and the version is pinned (e.g. `chrome-devtools-mcp@1.13.0`, not `@latest`).
+
+## 0.197.0
+
+- **Consult your organisation's web chat (such as Gemini) with `ask_web_chat`**, through your own Chrome and its Chrome DevTools MCP server. Set up once in Settings → Agents → Web chat: Light Code captures the chat's own request when you send a test phrase, and you approve the backend address it found - only that address is used afterwards. It cannot go outside your network: the request runs inside the chat page to that address only, the chat's address must be inside the network, the Chrome server must be a local install with its reporting to Google off, and the assistant never gets Chrome's own tools. Every consultation shows you the exact text first.
+
+## 0.196.0
+
+- **Choose what the decision model picks, per chat**: **Picks** beside the mode picker - off, skills, tools, or skills & tools. Skills only is often enough (a good skill names its tools) and is quicker. The chat keeps the choice, and so does a new chat started from it. It now also reads the two messages before your request, so a follow-up like "now do the same for production" is understood.
+- **Fire Code monitoring triage** now sees the alerts themselves (the first ten, with their rows), not only the headline.
+- **The startup bar shows short folder names** instead of whole temp paths; hover for the full path.
+
+## 0.195.0
+
+- **D3 is asked the way it is built to be asked.** D3 answers on its own decision API (`/v1/systemone`), not chat completions; Light Code now uses it, with a probability for every option. If your gateway puts D3 at another path, type it in Settings → Agents → Decision model → **Endpoint**; blank tries `/systemone` and falls back to chat completions for other decision models.
+- **The decision model picks the skill and the tool too**, in any mode: switch it on for a chat with **Skills & tools** beside the mode picker; the chat keeps it, and so does a new chat started from it (+, a handoff, a new Fire Code tab). Before each reply it suggests the skill to read and the tool to use, as advice added to your message - at most 4 seconds, usually much less.
+- **Fixed: a specialist could forget what it had been told earlier in the same reply** when another part of Light Code looked up the tool list at that moment; it now keeps its context.
+- **More from a decision model**, each with its own switch: a first pass for the Anti Hallucinator (steps it is sure of are reviewed with the next one, never skipped), **decision steps** in the Strategy window (it picks which connector to follow), hand-over scores against a connector's contract, suggestions of a better-fitting specialist in Agent team, telling when a rewritten plan is new work, and (Fire Code) announcing monitoring alerts louder or quieter by whether they need you now - never quieter for red.
+- Help updated throughout for the recent changes.
+
+## 0.194.0
+
+- **Decision models (such as D3 from vLLM Semantic Router).** Set one up under Providers as an OpenAI-compatible profile and choose it in Settings → Agents → Decision model. In Agent team mode it then sends each message to the specialist it picks, when it is sure enough (0.75 by default); a note above the message box says where it went, with **Answer it yourself** to take it back. It also judges strategy loop conditions (0.8 by default). **Test decision model** shows what your endpoint returns and what was read from it. With no decision model chosen, nothing changes.
+
+## 0.193.0
+
+- **Skills and Python tools load much faster** - the folders kept in step with a bucket especially. They are read in one go, in parallel (by the Rust helper where there is one, otherwise by Node), and a file that has not changed since the last load is not read again.
+- **Suggestions while typing** (Settings → Appearance, off unless turned on). The chat's model suggests the rest of what you are typing, in grey: Tab takes the next word; Ctrl+Space, or Right arrow at the end, takes all of it; Esc hides it.
+- **AutoSys dependencies and predecessors find conditions wherever the server puts them** - any spelling, one level down, or in raw JIL text. When a job shows none, the answer lists the fields the server returned, so a server that leaves the condition out is no longer reported as "no dependencies".
+
+## 0.192.0
+
+- **More AutoSys tools.** `autosys_run_stats`: how long a job usually runs (typical, average, fastest, slowest) and, for a job running now, an ETA in local time with the likely latest finish and a warning when it is running longer than usual. `autosys_usual_start`: when a job normally starts - from its run history, and for a job started by a dependency, worked out from its predecessors' definitions and run times. `autosys_predecessors`: every predecessor of a job, all the way up to the topmost jobs, with each one's status and whether its condition is met.
+
+## 0.191.0
+
+- **"+" keeps the strategy.** A new chat started from a chat that uses a strategy - "+", New chat, or a new Fire Code tab - now uses the same strategy, its loops starting fresh; pick another or press Stop using to change it. A chat with no strategy still gives a new chat with none.
+- **Fewer slow starts.** The host starts with more background threads for file reads, so one slow network share or drive can no longer hold up every other file it reads.
+- **A slow start no longer holds up your first message for minutes.** A message sent while the chat is still getting ready waits at most 20 seconds for skills and 45 for tools, then is answered with what has loaded; the rest is there for the next message.
+- **The startup bar says which step is slow** - the skills or tools folder being read, or the Python step under way - and the log names every step that took more than two seconds.
+
+## 0.190.0
+
+- **Custom roles work with `ask_agent` and in strategies.** A role made in Settings → Agents was refused as "no such role" however it was assigned. It is now found by its id or its name, and the strategy tells the agent the id to use beside a custom role's name.
+- **Following a strategy no longer fills up the main chat.** Each specialist already works in its own process with its own memory; now the hand-over between steps goes directly from one specialist to the next, and the main chat receives only each specialist's short summary. The full answers stay in the strategy record, readable with `strategy_history`.
+- **A bar over the message box says what a chat is getting ready** when it starts or wakes up - each MCP server still starting, Python tools, skills, the model gateway's sign-in - with how long each has taken so far.
+- **Hand off automatically**, beside Compact automatically under the token bar: when a chat reaches its context limit, the assistant writes a handoff and a new chat starts from it and carries on by itself. The old chat stays in History.
+- **No step limit** (Settings → Approvals): let the agent run until it finishes, you press Stop, or it fails the same way three times in a row - with the Anti Hallucinator on, it is watched and steered as it goes. Scheduled runs keep their limit.
+
+## 0.189.0
+
+- **A strategy stays with its chat.** Each chat keeps its own strategy, or none - a new chat starts with none. It now comes back whenever the chat does: after the window reloads, when a Fire Code chat wakes from sleep or restarts after a crash (before, only reopening a chat from History brought the strategy and the plan back), and even when it was chosen before the first message was sent. A handoff still carries it into the new chat.
+- **Every new topic follows the strategy.** The agent is told the strategy applies to each request in the chat, not only the first, and proposes a new plan through it for a new topic; that topic's back-and-forth loops start with their full number of rounds instead of finding the last topic's rounds used up.
+
+## 0.188.0
+
+- **Strategy: connect boxes, and a new kind of box.** A box in the Strategy window is now one step of the flow: connect it like a step - from its own dot on the right edge, or with Connect to... when it is selected - to a step or another box, and connect steps and boxes into it. What leads out of a box is followed only once every step inside has answered; what leads in is given to every step inside. Besides the parallel box there is **Add a box**, for a group of steps done one after another (in the order of the connectors between them, else as drawn); either kind can be switched on the right. A back-and-forth still joins two steps.
+- **Instructions for each step take `@` files.** The instructions box of a strategy step is larger and works like the message box: type `@` to pick a workspace file or folder, and its contents are attached each time that specialist is asked, with the same confinement and deny list as in the chat. The files named are listed under the box. Left empty, the main agent still decides what to ask that step.
+- **Chats start answering sooner after a crash or a restart.** Every chat remembers what each MCP server offered, in one file shared by the codebase's chats, so a newly started chat offers those tools at once and replies without waiting for every server to start; a server keeps starting in the background and a call to one of its tools waits for it. A server with nothing remembered is waited for at most 45 seconds. Each MCP server is also started once per chat now: a message sent while the servers were still starting used to start each of them a second time. The agent log names whatever is slow to start with a `[startup]` line.
+
+## 0.187.0
+
+- **`@` finds folders by name.** Typing `@reports` now offers the `reports/` folder and the files in it, even when no file name contains the word; choosing a folder keeps the picker open inside it, and typing a path such as `@src/reports/` searches inside that folder.
+- **Holds on through a slow or unreliable network.** A connection to the model gets a minute to come up instead of ten seconds, and a reset connection, a slow name lookup or a timeout is now tried again by itself ("Retrying in Ns", with the reason). Before, these errors were reworded in a way that hid what they were, so none of them was ever retried and the reply failed at once.
+- **Waits longer for a slow gateway to start answering**: 150 seconds instead of 45, which failed on a slow office network while other clients got through.
+- **The first reply of a chat comes sooner.** Python tools, skills, the gateway sign-in and its connection are prepared as soon as the chat opens, while you type, and the first message no longer waits for them one after another. The search tool's list of indexes is kept for five minutes instead of being fetched on every message.
+
+## 0.186.0
+
+- **Charts and pivot tables in Excel.** `excel_chart` creates, changes, lists and deletes charts from data in a sheet - column, bar, line, pie, doughnut, area, scatter, bubble, radar, and on Excel 2016 or later histogram, pareto, waterfall, treemap, sunburst, box-and-whisker and funnel - with titles, axis titles, legend, data labels, number format, and combo charts (series of different types, a secondary axis). It can take a picture of a chart so the assistant checks it shows what you asked, and reports which cells each series plots. `excel_pivot_table` builds pivot tables from column headings - rows, columns, filters, values (sum, count, average, max, min and more, or as a percentage of the total, row or column) - on a new sheet, optionally with a pivot chart, and returns the numbers; it also reads, refreshes and deletes them. The approval shows the data's headings and flags any name that is not one. Both ask every time and leave the workbook unsaved.
+- **A Files button in the chat header** lists the files in the folder the agent works in, newest first - made for folders of reports and workbooks with no git. "This chat" shows what this conversation made or changed (with the tool and the reason it gave), each row says the kind, size, when it changed and a line about its content, and opening a row shows more (line counts, a workbook's sheets, the start of its text) with Open, Show in folder and Mention in message.
+- **The assistant can set up DevOps connections for you** (`devops_setup`): Confluence, Jira, Bitbucket, Jenkins and AutoSys. It gathers the settings, you approve them, then a password box takes the token or password straight to secure storage - the assistant never sees it. It builds technical values itself, such as the `Basic <base64 of user:password>` sign-in an AutoSys API gateway forwards, saves exactly as Settings → DevOps does, and runs Test connection. Forms can now have password fields, whose values are never given to the assistant.
+- `--resume-interrupted`: continue the turn the last run was cut off in (Fire Code passes it after a crash).
+
+## 0.185.0
+
+- **Choosing a Gemini model works.** The model list loads as soon as a base URL and key are entered, with no model chosen first; every page of Google's catalogue is read (newer models such as Gemini 4 were past the first page), and only models that can chat are listed. If the list cannot load, the reason is shown under the dropdown instead of in the chat, and the dropdown no longer sits on "Loading…". Test Connection shows its reason in its own result the same way.
+- **Gemini no longer refuses a tool schema over `propertyNames`.** The schema cleanup for Gemini (used by GitHub Copilot models and the specialists' Rust process) now keeps only the keywords Gemini accepts, instead of removing a list of known-bad ones.
+- **Spent API credit is reported at once.** Gemini answers "prepayment credits are depleted" with HTTP 402 and RESOURCE_EXHAUSTED; that was retried three times as if it were an overload. A 402 or a billing message is now shown straight away.
+
+## 0.184.0
+
+- **Tables, charts and diagrams stay compact in a wide window.** Tables are as wide as their content instead of the whole reply, and a chart or diagram that asks for no size is drawn at most "large" (680 pixels) instead of full width - so in Fire Code they no longer stretch across the screen, while the text beside them still uses the full width. Nothing changes in VS Code's narrow panel.
+- **A tab opened for another agent's request archives itself once it has answered** (it stays in History), unless it stopped to ask you something, failed, or is the tab you are looking at.
+
+## 0.183.0
+
+- **Agents can ask each other across codebases** (in Fire Code). With `ask_codebase_agent`, a codebase's agent asks another codebase's agent for help or to do something there - you approve it, seeing the exact request. Fire Code opens a new tab on that codebase without switching to it; that agent works on the request with its own tools and asks for its own approvals in its tab, and its answer comes back to the first agent. Chains stop three asks deep.
+- **Another codebase's JupyterHub libraries**: `hub_inspect` and `hub_run` take `hub`, so the agent can see what is installed on another codebase's server (a named server included), read a function's signature or source, or run code there - in a kernel of its own, approved each time.
+
+## 0.182.0
+
+- **Ready for Gemini through an OpenAI-compatible gateway** (Gemini 3, 4 and later; nothing changes for Qwen or any other model on the same wire). Thought signatures are kept and sent back with every tool call - Gemini refuses the next request without them - including in chats reopened from History. Tool schemas are sent in the form Gemini accepts, with limits and defaults kept in the descriptions and free-form objects (such as `call_tool`'s arguments) offered as JSON text and turned back for the tool. Tool calls are kept however Gemini ends its stream, its thoughts are shown when Thinking is on, and a few lines of guidance cover its habits with tools. Every tool parameter now has a description.
+- **A tool call is no longer lost when a stream ends without saying "tool_calls"**, and when a model sends several calls at once it is told which ones did not run.
+- **A new chat with a handoff carries on by itself**: its first turn starts at once, with nothing to send.
+- **JupyterHub connections recover by themselves.** A dropped kernel connection reconnects to the same kernel, so its variables survive; a run cut off mid-way finishes from what the hub kept; a connection that went silent is noticed; every hub call has a time limit; and a hub server stopped by idle culling is started again. No agent restart needed.
+
+## 0.181.0
+
+- **A search connection's type now has to match its server.** Test connection speaks the type the connection is set to (it used to test everything as OpenSearch), each connection in Settings → Search shows its type, and indexing into the wrong kind of server says so - "answers like OpenSearch, but this connection's type is Qdrant" - instead of only "Could not read collection ... (HTTP 400)", which read like a bad index name.
+- **Skill warnings are logged once**, when they change, not again on every reload after a bucket sync.
+- **Under Fire Code, the agent records why it stopped**: a Node crash report on an out-of-memory stop (in `crash-reports` in its data folder), its memory every ten minutes with a warning near the heap limit, and how it exited.
+
 ## 0.180.0
 
 - **Checked contracts.** A connector's **Required items** (one per line) are checked after every hand-over: the specialist is told the format, and Light Code asks it again - twice at most - for any it left out before anything moves on. The main agent is told if a hand-over is still incomplete; the exchange log marks each contract kept or what was missing. **The agent proposes contracts** for connectors without one (`set_strategy_contracts`), and you approve each change.

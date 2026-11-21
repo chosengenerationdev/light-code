@@ -1,6 +1,6 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs'
-import type { CredentialSummary, JupyterHubSpec, MonitorExecutorChannel, MonitoringChannel } from '@light-code/core'
-import { CredentialPointerStore, createRelayDebugReader, createRelayLanguageModels, replaceFile, runFastFs } from '@light-code/core'
+import type { CredentialSummary, JupyterHubSpec, MonitorExecutorChannel, CodebaseAgentChannel, MonitoringChannel } from '@light-code/core'
+import { CredentialPointerStore, createRelayDebugReader, createRelayLanguageModels, openWithDefaultApp, replaceFile, revealInFolder, runFastFs } from '@light-code/core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -158,8 +158,11 @@ function createBrowserUi(
   post: (line: string) => void,
   /** Fire Code's Rust helper, when present: the `@` search runs on it. */
   fastFs?: string,
+  /** A shared server: opening a file would happen on the server's desktop, so the Files panel offers no Open. */
+  shared?: boolean,
 ): HostUi {
   return {
+    ...(shared !== true ? { openWithDefaultApp, revealInFolder } : {}),
     showInfo: (message) => post(`[info] ${message}`),
     showWarning: (message) => post(`[warn] ${message}`),
     showOpenDialog: async () => undefined,
@@ -227,11 +230,14 @@ function createBrowserUi(
             root: searchRoot,
             needle: segment,
             mode: mode ?? 'contains',
+            ...(mode === 'folders' ? { folders: true } : {}),
             ...(depth !== undefined ? { depth } : {}),
             limit,
             exclude: excludeFolders,
           })
-          if (answer.ok === true && Array.isArray(answer.paths)) return answer.paths as string[]
+          // An older helper ignores `folders` and answers with files; only one that says so is used.
+          const understood = mode !== 'folders' || answer.folders === true
+          if (understood && answer.ok === true && Array.isArray(answer.paths)) return answer.paths as string[]
         } catch {
           // Fall through to the walk.
         }
@@ -262,8 +268,10 @@ function createBrowserUi(
           if (entry.name.startsWith('.') && entry.name !== '.env') continue
           const full = path.join(dir, entry.name)
           if (entry.isDirectory()) {
-            if (!skip.has(entry.name)) await walk(full, level + 1)
-          } else if (depth !== undefined && level !== depth) {
+            if (skip.has(entry.name)) continue
+            if (mode === 'folders' && (needle.length === 0 || entry.name.toLowerCase().includes(needle))) found.push(full)
+            await walk(full, level + 1)
+          } else if (mode === 'folders' || (depth !== undefined && level !== depth)) {
             continue
           } else if (
             needle.length === 0 ||
@@ -351,6 +359,8 @@ export interface SessionOptions {
   desktopNotify?: boolean
   /** Fire Code's monitoring: the engine an agent asks, and - for the background executor - its fetches. */
   monitoring?: MonitoringChannel
+  /** Fire Code's relay between codebases' agents: asking theirs, and answering their requests. */
+  codebaseAgents?: CodebaseAgentChannel
   monitorExecutor?: MonitorExecutorChannel
   /** More Python tool folders, read only: the executor reads every codebase's. */
   extraToolDirs?: string[]
@@ -358,6 +368,8 @@ export interface SessionOptions {
   reachAnywhere?: boolean
   /** Other chats share this codebase (Fire Code's chat tabs): Rollback undoes only this chat's files. */
   sharedWorkspace?: boolean
+  /** Continue a turn the last run was cut off in (`agent/resume.ts`); Fire Code sets it after a crash. Not with --server. */
+  resumeInterrupted?: boolean
   /** Another process runs this codebase's schedules (Fire Code's extra chat tabs). */
   noSchedules?: boolean
   /** The other codebases open in Fire Code, by mention name. */
@@ -376,6 +388,11 @@ export interface SessionOptions {
   siblingHubs?: { name: string; spec: JupyterHubSpec }[]
   /** Python tool code approved anywhere on this machine (Fire Code). */
   machineApprovalsFile?: string
+  /**
+   * The user's own folder ("only me" skills and tools, the web chat setup). The CLI always passed it and nothing
+   * forwarded it, so on the Node host and in Fire Code there was none - found when the web chat panel would not show.
+   */
+  personalDir?: string
   /** Fire Code's saved credentials, by name, for `light_code.credential`. */
   savedCredentials?: () => Promise<readonly CredentialSummary[]>
   /** Fire Code's parallel Rust file helper; adds find_files, read_many_files, big_file, query_table. */
@@ -533,9 +550,12 @@ export async function createSession(
      * investigate it. Every open VS Code window is asked. IntelliJ and PyCharm are not yet (deferred).
      */
     ...(options.shared !== true ? { readDebugSession: createRelayDebugReader() } : {}),
+    ...(options.shared === true ? { sharedServer: true } : {}),
     ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
+    ...(options.resumeInterrupted === true && options.shared !== true ? { resumeInterrupted: true } : {}),
     // Fire Code's monitoring - one person's own machine only, like the rest of what Fire Code passes.
     ...(options.monitoring !== undefined && options.shared !== true ? { monitoring: options.monitoring } : {}),
+    ...(options.codebaseAgents !== undefined && options.shared !== true ? { codebaseAgents: options.codebaseAgents } : {}),
     ...(options.monitorExecutor !== undefined && options.shared !== true ? { monitorExecutor: options.monitorExecutor } : {}),
     ...(options.extraToolDirs !== undefined && options.extraToolDirs.length > 0 ? { extraToolDirs: options.extraToolDirs } : {}),
     ...(options.noSchedules === true ? { runsSchedules: false } : {}),
@@ -547,6 +567,7 @@ export async function createSession(
     ...(options.jupyterHub !== undefined ? { jupyterHub: options.jupyterHub } : {}),
     ...(options.siblingHubs !== undefined ? { siblingHubs: options.siblingHubs } : {}),
     ...(options.machineApprovalsFile !== undefined ? { machineApprovalsFile: options.machineApprovalsFile } : {}),
+    ...(options.personalDir !== undefined ? { personalDir: options.personalDir } : {}),
     ...(options.savedCredentials !== undefined ? { savedCredentials: options.savedCredentials } : {}),
     ...(options.desktopNotify === true
       ? {
@@ -587,7 +608,7 @@ export async function createSession(
       options,
     ),
     workspaceState,
-    ui: createBrowserUi(options.workspaceRoot, options.logSink, options.fastFs),
+    ui: createBrowserUi(options.workspaceRoot, options.logSink, options.fastFs, options.shared === true),
     workspaceRoot: options.workspaceRoot,
     storageDir: userDir,
     ripgrepPath: options.ripgrepPath,

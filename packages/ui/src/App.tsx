@@ -52,6 +52,7 @@ import {
 } from '@light-code/core/browser'
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import { stageFileWith } from './stagedFiles.js'
+import { completeWith } from './completions.js'
 import { Chat } from './Chat.js'
 import { ExpertBudget } from './ExpertBudget.js'
 import type { PendingApproval } from './approval/ApprovalPrompt.js'
@@ -62,7 +63,10 @@ import type { MailFolderNode } from './settings/FolderTree.js'
 import type { IndexingProgressState } from './settings/IndexingProgress.js'
 import type { MailStatusState } from './settings/OutlookTab.js'
 import { ModeSelector } from './ModeSelector.js'
+import { Select } from './Select.js'
+import type { DecisionRoute } from './DecisionRouteNote.js'
 import { StrategyButton } from './StrategyEditor.js'
+import { ArtifactsButton } from './ArtifactsButton.js'
 import { Guide } from './guide/Guide.js'
 import type { ReviewItem } from './settings/ReviewsTab.js'
 import { SettingsPanel } from './settings/SettingsPanel.js'
@@ -188,7 +192,14 @@ export function App(props: AppProps): ReactElement {
   const [modeId, setModeId] = useState<string>(DEFAULT_MODE_ID)
   const [approvals, setApprovals] = useState<WorkspaceApprovals>({})
   const [maxIterations, setMaxIterations] = useState(25)
+  const [unlimitedSteps, setUnlimitedSteps] = useState(false)
+  const [composerCompletion, setComposerCompletion] = useState(false)
+  const [decisionLabel, setDecisionLabel] = useState<string | undefined>(undefined)
+  const [decisionRoute, setDecisionRoute] = useState<DecisionRoute | undefined>(undefined)
+  const [chatPicks, setChatPicks] = useState<'off' | 'skills' | 'tools' | 'both'>('off')
   const [autoCompact, setAutoCompact] = useState(false)
+  const [autoHandoff, setAutoHandoff] = useState(false)
+  const [startupWaiting, setStartupWaiting] = useState<{ label: string; since: number; full?: string | undefined }[]>([])
   const [connectionRetry, setConnectionRetry] = useState({ stallSeconds: 300, retries: 3 })
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT)
   const [readRoots, setReadRoots] = useState<string[]>([])
@@ -679,7 +690,11 @@ export function App(props: AppProps): ReactElement {
         })
         setApprovals(message.approvals)
         setMaxIterations(message.maxIterations)
+        setUnlimitedSteps(message.unlimitedSteps === true)
+        setComposerCompletion(message.composerCompletion === true)
+        setDecisionLabel(message.decisionLabel)
         setAutoCompact(message.autoCompact === true)
+        setAutoHandoff(message.autoHandoff === true)
         setConnectionRetry({ stallSeconds: message.stallSeconds, retries: message.retries })
         setAccentColor(message.accentColor)
         setReadRoots(message.readRoots)
@@ -707,9 +722,18 @@ export function App(props: AppProps): ReactElement {
         setMessages(finalizePendingMessage)
         setPendingApproval(undefined)
         setIsStreaming(false)
+      } else if (message.type === 'hostTurnStarted') {
+        // Another codebase's agent asked this chat something: its turn runs as if sent from here, with Stop.
+        setError(undefined)
+        setIsStreaming(true)
       } else if (message.type === 'handoffProgress') {
         // A finished handoff needs no panel: the new chat, opening with the handoff, is the result.
         setHandoff(message.phase === 'done' ? undefined : { phase: message.phase, ...(message.written !== undefined ? { written: message.written } : {}), ...(message.message !== undefined ? { message: message.message } : {}) })
+        // The new chat's first turn started by itself: shown running, with Stop, as if it had been sent from here.
+        if (message.phase === 'done' && message.continuing === true) {
+          setError(undefined)
+          setIsStreaming(true)
+        }
       } else if (message.type === 'editorFile') {
         setEditorSaved(undefined)
         setEditorFile({ path: message.path, name: message.name, content: message.content, mtimeMs: message.mtimeMs })
@@ -784,6 +808,12 @@ export function App(props: AppProps): ReactElement {
           ...finalizePendingMessage(prev),
           { kind: 'text', role: 'user', content: message.text },
         ])
+      } else if (message.type === 'chatSkillToolPicks') {
+        setChatPicks(message.value)
+      } else if (message.type === 'decisionRoute') {
+        setDecisionRoute(message.role === undefined && message.note === undefined ? undefined : message)
+      } else if (message.type === 'startupProgress') {
+        setStartupWaiting(message.waiting)
       } else if (message.type === 'mentionCandidates') {
         if (latestMentionQuery.current === undefined || message.query === latestMentionQuery.current) {
           setMentionCandidates(message.paths)
@@ -1154,6 +1184,8 @@ export function App(props: AppProps): ReactElement {
     // without the user having to open Settings first.
     props.transport.post({ type: 'requestProfiles' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSettings' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestStartupProgress' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestChatSkillToolPicks' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestMcp' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestExpert' } satisfies UiToHostMessage)
     /*
@@ -1273,6 +1305,7 @@ export function App(props: AppProps): ReactElement {
   const latestMentionQuery = useRef<string | undefined>(undefined)
   // One per panel: it listens only while a file is being read.
   const [stageFile] = useState(() => stageFileWith(props.transport))
+  const [complete] = useState(() => completeWith(props.transport))
   const queryMentions = (query: string): void => {
     latestMentionQuery.current = query
     props.transport.post({ type: 'requestMentionCandidates', query } satisfies UiToHostMessage)
@@ -1841,6 +1874,35 @@ export function App(props: AppProps): ReactElement {
               teamAvailable={agents.roles.some((role) => role.kind !== undefined && role.available)}
             />
           )}
+          {/*
+            This chat's skill-and-tool picks by the decision model, in any mode - switched on here, per chat, and kept by a
+            chat started from it. Only once a decision model is set up (Settings → Agents).
+          */}
+          {view === 'chat' && decisionLabel !== undefined && (
+            <Select
+              compact
+              value={chatPicks}
+              ariaLabel="What the decision model picks for each request in this chat"
+              title={`What ${decisionLabel} picks for each request in this chat, as advice to the assistant. A new chat started from this one keeps it. Skills only is quicker, and a good skill names its tools.`}
+              options={[
+                { value: 'off', label: 'Picks: off' },
+                { value: 'skills', label: 'Picks: skills' },
+                { value: 'tools', label: 'Picks: tools' },
+                { value: 'both', label: 'Picks: skills & tools' },
+              ]}
+              onChange={(value) => {
+                const next = value as 'off' | 'skills' | 'tools' | 'both'
+                setChatPicks(next)
+                props.transport.post({ type: 'setChatSkillToolPicks', value: next } satisfies UiToHostMessage)
+              }}
+            />
+          )}
+          {/* Agent team with a decision model (Settings → Agents): said in the header, so it is clear when it is on. */}
+          {view === 'chat' && modeId === 'agent-team' && decisionLabel !== undefined && (
+            <span style={{ fontSize: 11, color: 'var(--vscode-descriptionForeground)', whiteSpace: 'nowrap' }} title="A decision model picks the specialist for each message (Settings → Agents → Decision model).">
+              decisions by {decisionLabel}
+            </span>
+          )}
           {/* Agent team mode's flow chart of how the specialists are used (`StrategyEditor.tsx`). */}
           {/* In every mode once a specialist is assigned: a strategy in use applies to the chat, whatever the mode. */}
           {view === 'chat' && agents.roles.some((role) => role.kind !== undefined && role.available) && <StrategyButton transport={props.transport} inEditor={strategyInEditor} onAsk={(text) => setPrefill({ text, nonce: Date.now() })} />}
@@ -1905,6 +1967,8 @@ export function App(props: AppProps): ReactElement {
             >
               <HandoffIcon />
             </button>
+            {/* The files in the folder the agent works in, and what this chat made or changed (`ArtifactsButton.tsx`). */}
+            <ArtifactsButton transport={props.transport} onMention={(path) => setAddedFiles({ paths: [path], nonce: Date.now() })} />
             <button
               type="button"
               aria-label="History"
@@ -2056,6 +2120,12 @@ export function App(props: AppProps): ReactElement {
             onRevokeTool={revokeTool}
             onRevokeCommand={revokeCommand}
             maxIterations={maxIterations}
+            unlimitedSteps={unlimitedSteps}
+            composerCompletion={composerCompletion}
+            onSetComposerCompletion={(value) => {
+              setComposerCompletion(value)
+              props.transport.post({ type: 'setComposerCompletion', value } satisfies UiToHostMessage)
+            }}
             readRoots={readRoots}
             onSetReadRoots={(roots) =>
               props.transport.post({ type: 'setReadRoots', roots } satisfies UiToHostMessage)
@@ -2175,6 +2245,10 @@ export function App(props: AppProps): ReactElement {
             onSetMaxIterations={(value) =>
               props.transport.post({ type: 'setMaxIterations', value } satisfies UiToHostMessage)
             }
+            onSetUnlimitedSteps={(value) => {
+              setUnlimitedSteps(value)
+              props.transport.post({ type: 'setUnlimitedSteps', value } satisfies UiToHostMessage)
+            }}
             stallSeconds={connectionRetry.stallSeconds}
             retries={connectionRetry.retries}
             onSetConnectionRetry={(stallSeconds, retries) =>
@@ -2845,7 +2919,20 @@ export function App(props: AppProps): ReactElement {
               setAutoCompact(value)
               props.transport.post({ type: 'setAutoCompact', value } satisfies UiToHostMessage)
             }}
+            autoHandoff={autoHandoff}
+            onSetAutoHandoff={(value) => {
+              setAutoHandoff(value)
+              props.transport.post({ type: 'setAutoHandoff', value } satisfies UiToHostMessage)
+            }}
+            startupWaiting={startupWaiting}
+            decisionRoute={decisionRoute}
+            onDismissRoute={() => setDecisionRoute(undefined)}
+            onAnswerYourself={(role) => {
+              props.transport.post({ type: 'queueMessage', text: `Answer this request yourself - do not consult ${role} for it.` } satisfies UiToHostMessage)
+              setDecisionRoute(undefined)
+            }}
             stageFile={stageFile}
+            complete={composerCompletion ? complete : undefined}
             onPickFiles={
               picksFiles ? () => props.transport.post({ type: 'pickContextFiles' } satisfies UiToHostMessage) : undefined
             }

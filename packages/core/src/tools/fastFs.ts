@@ -113,15 +113,15 @@ const grepSchema = z.object({
   pattern: z.string().min(1).describe('A regular expression (or plain text with literal: true). Case-insensitive unless it has a capital letter.'),
   roots: z.array(z.string().min(1)).min(1).max(20).describe('Folders or files to search: workspace-relative, absolute, another drive, or shares like \\\\server\\share\\folder - several at once.'),
   literal: z.boolean().optional().describe('Search for the text exactly as written, not as a regular expression.'),
-  caseSensitive: z.boolean().optional(),
-  wholeWord: z.boolean().optional(),
+  caseSensitive: z.boolean().optional().describe('Match capital letters exactly (default: case-insensitive).'),
+  wholeWord: z.boolean().optional().describe('Match whole words only.'),
   names: z.array(z.string()).optional().describe('Only files whose names match these patterns (* and ?), e.g. ["*.log", "*.py"].'),
   extensions: z.array(z.string()).optional().describe('e.g. ["py", "sql"].'),
   modifiedAfter: dateSchema,
   modifiedBefore: dateSchema,
   context: z.number().int().min(0).max(10).optional().describe('Lines before and after each match.'),
   filesOnly: z.boolean().optional().describe('List the matching files with a count each, not the lines.'),
-  includeHidden: z.boolean().optional(),
+  includeHidden: z.boolean().optional().describe('Include hidden files and folders (names starting with a dot).'),
   respectGitignore: z.boolean().optional().describe('Skip what .gitignore excludes (default true).'),
   maxPerFile: z.number().int().min(1).max(1000).optional().describe('Matches shown per file (default 50).'),
   limit: z.number().int().min(1).max(5000).optional().describe('Matches in all (default 300).'),
@@ -134,14 +134,14 @@ const findSchema = z.object({
   roots: z.array(z.string().min(1)).min(1).max(20).describe('Folders to look in: workspace-relative, absolute, another drive, or a share like \\\\server\\share\\folder.'),
   names: z.array(z.string()).optional().describe('File-name patterns (* and ?) or plain text the name contains. Case-insensitive.'),
   extensions: z.array(z.string()).optional().describe('e.g. ["xlsx", "csv"].'),
-  minSizeBytes: z.number().int().min(0).optional(),
-  maxSizeBytes: z.number().int().min(0).optional(),
+  minSizeBytes: z.number().int().min(0).optional().describe('Only files at least this many bytes.'),
+  maxSizeBytes: z.number().int().min(0).optional().describe('Only files at most this many bytes.'),
   modifiedAfter: dateSchema,
   modifiedBefore: dateSchema,
   directories: z.boolean().optional().describe('find: list folders instead of files.'),
-  includeHidden: z.boolean().optional(),
+  includeHidden: z.boolean().optional().describe('Include hidden files and folders (names starting with a dot).'),
   respectGitignore: z.boolean().optional().describe('Skip what .gitignore excludes (inside repositories).'),
-  maxDepth: z.number().int().min(0).max(64).optional(),
+  maxDepth: z.number().int().min(0).max(64).optional().describe('How many folder levels below each root to look (0 = the root only).'),
   limit: z.number().int().min(1).max(2000).optional().describe('find: default 200. duplicates: groups, default 30.'),
 })
 
@@ -149,9 +149,9 @@ const readManySchema = z.object({
   files: z
     .array(
       z.object({
-        path: z.string().min(1),
-        fromLine: z.number().int().min(1).optional(),
-        lines: z.number().int().min(1).optional(),
+        path: z.string().min(1).describe('The file.'),
+        fromLine: z.number().int().min(1).optional().describe('First line to read (1-based).'),
+        lines: z.number().int().min(1).optional().describe('How many lines from fromLine.'),
       }),
     )
     .min(1)
@@ -163,11 +163,11 @@ const bigFileSchema = z.object({
   action: z.enum(['inspect', 'lines', 'tail', 'search']).describe(
     'inspect: size, line count, first lines, and for CSV/Excel the columns and their types. lines: a window (fromLine, count). tail: the last lines. search: a regular expression across the whole file, with context lines.',
   ),
-  path: z.string().min(1),
-  fromLine: z.number().int().min(1).optional(),
+  path: z.string().min(1).describe('The file: workspace-relative, absolute or on a share.'),
+  fromLine: z.number().int().min(1).optional().describe('lines: the first line of the window (1-based).'),
   count: z.number().int().min(1).max(5000).optional().describe('lines/tail: how many (default 200 / 100).'),
   pattern: z.string().optional().describe('search: a regular expression (case-insensitive unless caseSensitive).'),
-  caseSensitive: z.boolean().optional(),
+  caseSensitive: z.boolean().optional().describe('Match capital letters exactly (default: case-insensitive).'),
   context: z.number().int().min(0).max(10).optional().describe('search: lines before and after each match.'),
   limit: z.number().int().min(1).max(500).optional().describe('search: matches to return (default 100).'),
 })
@@ -175,7 +175,7 @@ const bigFileSchema = z.object({
 const tableSchema = z.object({
   path: z.string().min(1).describe('A .csv, .tsv or delimited text file, or an Excel workbook (.xlsx, .xlsm, .xls) or .ods.'),
   sheet: z.string().optional().describe('Workbook sheet; the first when omitted.'),
-  delimiter: z.string().max(1).optional(),
+  delimiter: z.string().max(1).optional().describe('Delimited text: the separator character (detected when omitted).'),
   header: z.boolean().optional().describe('First row is the header (default true).'),
   columns: z.array(z.string()).optional().describe('Columns to return, without grouping.'),
   filters: z
@@ -188,10 +188,11 @@ const tableSchema = z.object({
     )
     .optional()
     .describe('All must match. Numbers compare as numbers.'),
-  groupBy: z.array(z.string()).optional(),
+  groupBy: z.array(z.string()).optional().describe('Group rows by these columns; use with aggregates.'),
   aggregates: z
-    .array(z.object({ fn: z.enum(['count', 'sum', 'avg', 'min', 'max', 'distinct']), column: z.string().optional() }))
-    .optional(),
+    .array(z.object({ fn: z.enum(['count', 'sum', 'avg', 'min', 'max', 'distinct']), column: z.string().optional().describe('The column (not needed for count).') }))
+    .optional()
+    .describe('Per group (or over all rows): e.g. [{"fn": "sum", "column": "amount"}, {"fn": "count"}].'),
   sort: z.array(z.object({ column: z.string(), desc: z.boolean().optional() })).optional().describe('By result column name, e.g. "sum(amount)".'),
   offset: z.number().int().min(0).optional().describe('Page through results.'),
   limit: z.number().int().min(1).max(500).optional().describe('Rows to return (default 50).'),
@@ -212,7 +213,7 @@ const sqliteSchema = z.object({
   groupBy: z.array(z.string()).optional().describe('scan: group by these columns.'),
   aggregates: tableSchema.shape.aggregates,
   sort: z.array(z.object({ column: z.string(), desc: z.boolean().optional() })).optional().describe('scan: by column, or by result column such as "sum(amount)" when grouping.'),
-  offset: z.number().int().min(0).optional(),
+  offset: z.number().int().min(0).optional().describe('Rows to skip, to page through results.'),
   limit: z.number().int().min(1).max(5000).optional().describe('Rows to return (query default 200, scan 50, search 100).'),
   text: z.string().optional().describe('search: the text to find, case-insensitive.'),
   tables: z.array(z.string()).optional().describe('search: only these tables.'),
@@ -256,7 +257,8 @@ const dataframeSchema = z.object({
       }),
     )
     .min(1)
-    .max(20),
+    .max(20)
+    .describe('The tables to query: each a file, a SQLite table, records you already have, a truncated tool result, or the clipboard.'),
   steps: z
     .array(z.object({ name: z.string(), sql: z.string() }))
     .max(20)
@@ -276,16 +278,17 @@ const dataframeSchema = z.object({
     })
     .optional()
     .describe('sql: turn the result (or the first source, without sql) wide.'),
-  offset: z.number().int().min(0).optional(),
+  offset: z.number().int().min(0).optional().describe('Rows to skip, to page through results.'),
   limit: z.number().int().min(1).max(5000).optional().describe('Rows to return (default 50).'),
 })
 
 const transferSchema = z.object({
   action: z.enum(['copy', 'move']).describe('copy leaves the source; move removes it once everything is copied.'),
   items: z
-    .array(z.object({ from: z.string().min(1), to: z.string().min(1).describe('The full destination path: the new folder or file, not its parent.') }))
+    .array(z.object({ from: z.string().min(1).describe('The file or folder to copy or move.'), to: z.string().min(1).describe('The full destination path: the new folder or file, not its parent.') }))
     .min(1)
-    .max(50),
+    .max(50)
+    .describe('What to copy or move, up to 50 pairs.'),
   overwrite: z
     .boolean()
     .optional()

@@ -4,8 +4,9 @@ import os from 'node:os'
 import path from 'node:path'
 import url from 'node:url'
 import * as esbuild from 'esbuild'
-import { Server, utils, type Connection } from 'ssh2'
+import { Server, type Connection } from 'ssh2'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { readableKeyPair } from './keySetup.js'
 
 import { deliveryFor, possibleSecretRefs } from '../../../packages/core/src/addons/delivery.js'
 import { addonServerEntry, discoverAddons, runnableServers } from '../../../packages/core/src/addons/discover.js'
@@ -48,7 +49,7 @@ beforeAll(async () => {
     fs.copyFileSync(path.join(packageDir, file), path.join(installed, file))
   }
 
-  sshServer = new Server({ hostKeys: [utils.generateKeyPairSync('ed25519').private] }, (client: Connection) => {
+  sshServer = new Server({ hostKeys: [readableKeyPair().private] }, (client: Connection) => {
     client.on('authentication', (ctx) => (ctx.method === 'password' && ctx.password === 's3cret' ? ctx.accept() : ctx.reject(['password'])))
     client.on('ready', () =>
       client.on('session', (acceptSession) => {

@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Server, utils, type Connection } from 'ssh2'
 import { afterEach, describe, expect, it } from 'vitest'
+import { readableKeyPair } from './keySetup.js'
 
 import type { LinuxSettings, Machine } from './settings.js'
 import { findPageantPipe, SshPool } from './ssh.js'
@@ -79,7 +80,7 @@ afterEach(async () => {
 
 describe.skipIf(process.platform !== 'win32')('signing in through Pageant', () => {
   it('finds a running Pageant by itself and signs in with its key, starting no program', async () => {
-    const pair = utils.generateKeyPairSync('ed25519')
+    const pair = readableKeyPair()
     const user = os.userInfo().username
     const pipe = `\\\\.\\pipe\\pageant.${user}.lctest${String(process.pid)}${String(Date.now())}`
     const agent = startAgent(pipe, pair.private)
@@ -89,7 +90,7 @@ describe.skipIf(process.platform !== 'win32')('signing in through Pageant', () =
     // An SSH server that knows only this key, and checks its signature as sshd does.
     const knownBlob = (utils.parseKey(pair.public) as { getPublicSSH: () => Buffer }).getPublicSSH().toString('base64')
     const commands: string[] = []
-    const server = new Server({ hostKeys: [utils.generateKeyPairSync('ed25519').private] }, (client: Connection) => {
+    const server = new Server({ hostKeys: [readableKeyPair().private] }, (client: Connection) => {
       client.on('authentication', (ctx) => {
         if (ctx.method !== 'publickey' || ctx.key.data.toString('base64') !== knownBlob) return ctx.reject(['publickey'])
         if (ctx.signature === undefined) return ctx.accept()

@@ -11,8 +11,23 @@ import { listSkillFiles } from '../skills/files.js'
 import { createHubRuntime, hubGuidance, withoutMissingImports } from '../jupyter/runtime.js'
 import { FileMachineApprovals } from '../python/machineApprovals.js'
 import { redact } from '../logging/redact.js'
+import { cleanSuggestion, TYPE_AHEAD_MIN_CHARS, typeAheadMessages } from '../agent/typeAhead.js'
+import { shortenPaths } from './startupPaths.js'
+import { readWebChatSetup, webChatSetupFile, writeWebChatSetup, type WebChatSetup } from '../webchat/setup.js'
+import { chromeServerProblems, webChatAddressProblem } from '../webchat/guard.js'
+import { askWebChat, isChromeDevToolsServer, runScript, selectWebChatPage, type ChromeAccess } from '../webchat/chrome.js'
+import { candidatesFrom, capturePhrase, type CaptureCandidate, type CapturedRequest } from '../webchat/capture.js'
+import { readCaptureScript, typePhraseScript, watchScript } from '../webchat/inpage.js'
+import { createAskWebChatTool } from '../webchat/tool.js'
+import { decide, decisionEndpointProblem, DEFAULT_LOOP_THRESHOLD, DEFAULT_ROUTE_THRESHOLD, loopVerdict, type Decision, type DecisionModel, type DecisionQuestion } from '../decision/decide.js'
+import { describeRoute, routedRole, routeQuestion } from '../decision/route.js'
+import { DEFAULT_FIRST_PASS_THRESHOLD, describeStep, FIRST_PASS_QUESTION } from '../decision/firstPass.js'
+import { DEFAULT_HANDOVER_THRESHOLD, describeSuggestions, handoverQuestion, isSkillToolPicks, newWorkQuestion, picked, roleSuggestion, skillQuestion, toolQuestion, triageQuestion, withRecentChat, type SkillToolPicks } from '../decision/more.js'
+import type { ObservedEvent } from '../observers/events.js'
+import type { DecisionModelSettings, DecisionTestResult } from '../agent/protocol.js'
 import { compactHistory, isContextOverflow, isSummaryMessage } from '../context/compact.js'
 import { repairUnansweredToolCalls } from '../agent/repairHistory.js'
+import { RESUME_PROMPT, resumeDecision } from '../agent/resume.js'
 import {
   addonServerEntry,
   addonState,
@@ -33,7 +48,8 @@ import {
 import { readToolCredential } from '../python/toolCredentials.js'
 import type { CredentialSummary } from '../secrets/credentials.js'
 import { cleanSkillDefaults, findPlaceholders, renderSkillDefaults, skillDefaultsReadNote } from '../skills/defaults.js'
-import { createHubTools, describePull } from '../jupyter/tools.js'
+import { createHubTools, describePull, type OtherHub } from '../jupyter/tools.js'
+import { KernelSession } from '../jupyter/kernel.js'
 import { hubGitCommitPush, hubGitDiff, hubGitPull, hubGitStatus } from '../jupyter/hubGit.js'
 import { createHubBrowseTool, type BrowsableHub } from '../jupyter/browse.js'
 import { JupyterClient } from '../jupyter/client.js'
@@ -69,6 +85,7 @@ import { describeMigration, planMigration, runMigration } from '../migrate/folde
 import { defaultPythonToolsDir, REGISTRY_FILE } from '../python/registry.js'
 import { detectCommandTools, resolveShell, type CommandToolset } from '../platform/node/shell.js'
 import { fastFsCapabilities } from '../platform/node/fireHelper.js'
+import { agentWrites, artifactKey, describeArtifact, kindOf, listArtifacts } from '../artifacts/artifacts.js'
 import { splitProxyLogin } from '../platform/proxy.js'
 import { createPythonLibraryTool } from '../tools/pythonLibrary.js'
 import { isOffloadable, offloadedCatalogue } from '../tools/offload.js'
@@ -91,6 +108,7 @@ import {
   markCheckpoint,
   progressSummary,
   pruneProgress,
+  startsNewWork,
   type CheckpointView,
   type PlanProgress,
 } from '../agent/checkpoints.js'
@@ -109,6 +127,8 @@ import {
 import { buildAgentBriefing } from '../agents/briefing.js'
 import { CONSULT_MAX_STEPS, runConsultation, runConsultTool, toolsForConsultation } from '../agents/consult.js'
 import { toAnthropicTools, toGeminiTools, toOpenAITools } from '../providers/schema.js'
+import { isGeminiModel } from '../providers/geminiCompat.js'
+import { answerFromConversation, composeTaskMessage, createAskCodebaseAgentTool } from '../agents/codebaseAgents.js'
 import { toToolDefinitions } from '../tools/registry.js'
 import {
   allRoles,
@@ -184,6 +204,8 @@ import {
   createOutlookSearchTool,
   createOutlookReadTool,
 } from '../tools/office.js'
+import { createExcelChartTool, createExcelPivotTool } from '../tools/excelCharts.js'
+import { createDevopsSetupTool } from '../tools/devopsSetup.js'
 import { createOutlookDraftTool } from '../tools/outlookDraft.js'
 import {
   createExcelCheckMacroTool,
@@ -205,7 +227,7 @@ import {
   type FormField,
   type FormValue,
 } from '../tools/askUserForm.js'
-import { confineToAny, normalizeForComparison } from '../fs/confine.js'
+import { confine, confineToAny, normalizeForComparison } from '../fs/confine.js'
 import { isValidEnvName, pythonEnvEntries, pythonEnvSecretRef } from '../python/env.js'
 import {
   approveTool,
@@ -436,12 +458,15 @@ import {
   type UiToHostMessage,
   type WorkspaceApprovals,
 } from '../index.js'
+import { fileMcpToolCache, mcpToolCacheFile } from '../mcp/toolCache.js'
+import { clearPendingSteering, pendingSteeringFile, readPendingSteering, writePendingSteering, type ChatSteering } from '../agent/chatSteering.js'
 import { WebviewApprovalGate } from './approvalGate.js'
 import type { HostServices } from './services.js'
 import { NodeFileSystem } from '../platform/node/filesystem.js'
 import { configuredProjectName, projectName, projectSlug } from '../config/project.js'
 import type { DefaultSearchScope } from '../sharing/scope.js'
 import { copyBookkeeping, copyIndex, hasDocuments, planIndexRenames, type IndexRename } from '../rag/renameIndexes.js'
+import { probeVectorStore } from '../rag/serverKind.js'
 import { walkFiles } from '../tools/nativeSearch.js'
 import { NodeTerminal } from '../platform/node/terminal.js'
 import { JsonTaskStore } from '../platform/node/taskStore.js'
@@ -458,6 +483,7 @@ import { createUsageStatsTool, type UsageData } from '../usage/statsTool.js'
 import { RECORD_USER_PROFILE, createRecordUserProfileTool, userInfoSkillCandidates, userInfoToolCandidates, userProfileGuidance } from '../usage/profileTool.js'
 import { lookupDirectory, profileFromPerson, type DirectoryPerson } from '../usage/directory.js'
 import { runFastFs } from '../tools/fastFs.js'
+import { LibraryReader } from '../library/snapshot.js'
 import { AuditIndex, auditIndexName } from '../observers/auditIndex.js'
 import { isObserverNote, noteForAgent, previewText } from '../observers/events.js'
 import { ObserverHub, type ObserverSettings } from '../observers/hub.js'
@@ -466,7 +492,8 @@ import { ObserverAgent, type ObserverModelSpec, type ObserverRole, type Observer
 import { auditorPrompt, guardPrompt } from '../observers/prompts.js'
 import { createReadAuditTool } from '../observers/tool.js'
 import { RoleProcess } from '../agents/roleProcess.js'
-import { afterConsult, askForMissing, beforeConsult, contractCheck, describeStrategy, exchangeOf, MAX_EXCHANGES, strategyProblems, strategySchema, type Strategy, type StrategyExchange, type StrategyProgress } from '../strategy/strategy.js'
+import { branchChoice } from '../strategy/strategy.js'
+import { afterConsult, answerForMain, askForMissing, handOverSources, SUMMARY_REQUEST, beforeConsult, contractCheck, describeStrategy, exchangeOf, MAX_EXCHANGES, strategyProblems, strategySchema, type Strategy, type StrategyExchange, type StrategyProgress } from '../strategy/strategy.js'
 import { createStrategyHistoryTool } from '../strategy/historyTool.js'
 import { createSetStrategyContractsTool } from '../strategy/contractsTool.js'
 import { mayDecide, mayEditAdmins, normaliseUserId, parseUserIds, reviewNeeded, teamIndexName, TeamStore, windowsUserId, type AdminList, type TeamKind, type TeamReview } from '../team/admins.js'
@@ -739,9 +766,24 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       .catch(() => undefined)
   }
 
+  /*
+   * Skill and tool folders read all at once - by the Rust helper where there is one, else in parallel by Node - and
+   * unchanged files kept between loads (`library/snapshot.ts`; reported: loading took a minute and a half).
+   */
+  const libraryReader = new LibraryReader(
+    () => (services.fastFs === undefined ? undefined : (request: object) => runFastFs(services.fastFs as string, request) as Promise<Record<string, unknown>>),
+    (message) => logger.info(message),
+  )
+
   const python: PythonManager = new PythonManager({
     workspaceRoot,
     storageDir,
+    librarySnapshot: (dirs) => libraryReader.snapshot(dirs.map((dir) => ({ dir, kind: 'tools' as const }))),
+    // The step Python is on, for the startup bar; a slow one is named in the log.
+    onProgress: (step, tookMs) => {
+      if (tookMs === undefined) startupStep('Python tools', step)
+      else noteSlowStep(`Python tools: ${step}`, tookMs)
+    },
     ...(personalToolsDir !== undefined ? { personalToolsDir, sharedWith: () => sharedWith('tools') } : {}),
     ...(services.codebaseDir !== undefined ? { venvRoot: services.codebaseDir } : {}),
     logger,
@@ -941,6 +983,74 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   })
 
   /**
+   * The cluster's index names for the search tool's description - a network call, so kept for five
+   * minutes and given five seconds: a slow cluster costs the model a hint, never a delayed reply.
+   */
+  const indexNames = new WeakMap<object, { at: number; names: Promise<string[]> }>()
+  function indexNamesFor(client: { listIndexes(): Promise<{ name: string }[]> }): Promise<string[]> {
+    const held = indexNames.get(client)
+    if (held !== undefined && Date.now() - held.at < 5 * 60_000) return held.names
+    const names = Promise.race([
+      client.listIndexes().then((list) => list.map((i) => i.name)),
+      new Promise<string[]>((resolve) => setTimeout(() => resolve([]), 5_000).unref?.()),
+    ]).catch(() => [] as string[])
+    indexNames.set(client, { at: Date.now(), names })
+    return names
+  }
+
+  /**
+   * Waits for part of the setup, but not for minutes: past `seconds` the reply goes ahead with what is loaded, and the
+   * rest arrives for the next message. Reported: a first reply waited 4 and a half minutes for skills and Python tools.
+   */
+  async function boundedWait(work: Promise<unknown>, label: string, seconds = 20): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = await Promise.race([
+      work.then(
+        () => false,
+        (error: unknown) => {
+          throw error
+        },
+      ),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(true), seconds * 1000)
+      }),
+    ]).finally(() => clearTimeout(timer))
+    if (late) logger.info(`[startup] replying without waiting longer for ${label} (still loading after ${String(seconds)}s)`)
+  }
+
+  /** A promise started ahead of where it is awaited: its failure is reported there, not as unhandled. */
+  function early<T>(promise: Promise<T>): Promise<T> {
+    promise.catch(() => undefined)
+    return promise
+  }
+
+  /**
+   * Python's setup, one at a time. The chat page's warm-up (`warmUp`) configures Python while
+   * nobody is waiting, and a message sent meanwhile asks again; two at once could start two workers.
+   */
+  let pythonConfiguring: Promise<void> = Promise.resolve()
+  function configurePython(config: LightCodeConfig): Promise<void> {
+    const next = pythonConfiguring
+      .catch(() => undefined)
+      .then(() => python.configure({ ...(config.python ?? {}), ...pythonFolders(config) }))
+    pythonConfiguring = next
+    return next
+  }
+
+  /** Whether git runs, asked once (a process start each turn adds up); a "no" is asked again a minute later. */
+  let gitCheck: { at: number; answer: Promise<boolean> } | undefined
+  function gitAvailable(): Promise<boolean> {
+    if (gitCheck === undefined || Date.now() - gitCheck.at > 60_000) {
+      const answer = ShadowGit.isGitAvailable()
+      gitCheck = { at: Date.now(), answer }
+      void answer.then((ok) => {
+        if (ok) gitCheck = { at: Number.POSITIVE_INFINITY, answer }
+      })
+    }
+    return gitCheck.answer
+  }
+
+  /**
    * Skills, reloaded per turn.
    *
    * In the workspace beside the tools, for the same reason: a skill is prose the model
@@ -1032,11 +1142,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   const refreshSkills = async (): Promise<void> => {
     const dirs = skillSearchPath()
     if (dirs.length === 0) return
-    const loaded = await loadSkills(dirs)
+    const io = await libraryReader.snapshot(dirs.map((dir) => ({ dir, kind: 'skills' as const }))).catch(() => undefined)
+    const loaded = await loadSkills(dirs, (dir, tookMs) => {
+      if (tookMs === undefined) startupStep('Skills', `reading ${dir}`)
+      else noteSlowStep(`Skills: reading ${dir}`, tookMs)
+    }, io)
+    startupStep('Skills', undefined)
     skills = loaded.skills
     skillIssues = loaded.issues
-    for (const issue of loaded.issues) logger.warn(`skill ${issue.filePath}: ${issue.detail}`)
+    // Logged when the list changes, not on every reload: a bucket sync reloads every few minutes,
+    // and the same shadowing warnings repeated each time filled the log around a crash (reported).
+    const signature = loaded.issues.map((issue) => `${issue.filePath}\u0000${issue.detail}`).join('\n')
+    if (signature !== loggedSkillIssues) {
+      loggedSkillIssues = signature
+      for (const issue of loaded.issues) logger.warn(`skill ${issue.filePath}: ${issue.detail}`)
+    }
   }
+  let loggedSkillIssues = ''
 
   /*
    * Watches the skill folders, so a file dropped in appears without reopening anything.
@@ -1739,7 +1861,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       })
       {
         const latest = (await configManager.load()).config
-        await python.configure({ ...(latest.python ?? {}), ...pythonFolders(latest) })
+        await configurePython(latest)
       }
       await python.refresh()
       await postPython()
@@ -1764,7 +1886,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       })
       {
         const latest = (await configManager.load()).config
-        await python.configure({ ...(latest.python ?? {}), ...pythonFolders(latest) })
+        await configurePython(latest)
       }
       await python.refresh()
       await postPython()
@@ -2186,9 +2308,38 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * twice, one of them would eventually forget the pruning and the panel would report a step
    * that is no longer in the plan as done.
    */
+  /**
+   * Whether a changed plan starts new work, asked of the decision model when the rule in `startsNewWork` says it does
+   * not (a plan rewritten for another task while the old one was half done). Only ever adds a fresh start; without a
+   * decision model, the rule alone decides as before.
+   */
+  async function newWorkByDecisionModel(previous: string | undefined, next: string | undefined): Promise<boolean> {
+    if (cachedDecision?.profileId === undefined || cachedDecision.newTopics === false) return false
+    if (previous === undefined || next === undefined || previous === next) return false
+    const threshold = cachedDecision.loopThreshold ?? DEFAULT_LOOP_THRESHOLD
+    const decision = await askDecisionModel('New topic', newWorkQuestion(previous, next), (d) => {
+      const yes = d.probabilities?.['yes']
+      return yes !== undefined && yes >= threshold ? 'new work: loops start again' : 'a revision: loops kept'
+    })
+    const yes = decision?.probabilities?.['yes']
+    return decision?.ok === true && yes !== undefined && yes >= threshold
+  }
+
   async function applyPlan(next: string | undefined): Promise<void> {
     const trimmed = next?.slice(0, PLAN_LIMIT).trim()
-    activePlan = trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined
+    const nextPlan = trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined
+    /*
+     * A new topic in a chat that follows a strategy is a new run of that strategy (asked for: "each new topic should
+     * respect that strategy"). Its loops start again, or the second topic would find the first one's back-and-forth
+     * rounds used up and be refused. What passed between the specialists is kept - it is the chat's record.
+     */
+    if (activeStrategy !== undefined && (startsNewWork(activePlan, activePlanProgress, nextPlan) || (await newWorkByDecisionModel(activePlan, nextPlan)))) {
+      strategyProgress = {}
+      strategyLastRole = undefined
+      resetHandOvers()
+      void postStrategies()
+    }
+    activePlan = nextPlan
     activePlanProgress = pruneProgress(activePlan, activePlanProgress)
     /*
      * Saved immediately rather than at the end of the next turn.
@@ -2332,6 +2483,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * tell the two apart.
    */
   let userTurnRunning = false
+  /*
+   * A chat turn is between its start and its end-of-turn save (`agent/resume.ts`). Saved as `turnRunning`, so a
+   * task reopened with it set was cut off. Separate from `userTurnRunning`, which is still true when that save runs.
+   */
+  let turnInFlight = false
+  /** Automatic resumes after a crash, in a row, for the open task. Reset when a turn finishes. */
+  let crashResumes = 0
+  /** The reopened task was cut off mid-turn; consumed once, at start-up. */
+  let restoredInterruptedTurn = false
   /**
    * The user's turn as a promise, and whether it has already told the panel it is done.
    *
@@ -2440,6 +2600,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   /** Mirrors config so the loop and the settings message agree without re-reading. */
   let cachedMaxIterations = 25
   let cachedAutoCompact = false
+  let cachedAutoHandoff = false
+  let cachedUnlimitedSteps = false
+  let cachedComposerCompletion = false
+  /** Settings → Agents → Decision model, and the label of its profile when one is set up and usable. */
+  let cachedDecision: DecisionModelSettings | undefined
+  let cachedDecisionLabel: string | undefined
+  /** The mode of the turn running now: role suggestions are made in Agent team only. */
+  let turnModeId: string | undefined
+  /** This chat: what the decision model picks for each request - skills, tools or both. Saved with the chat, carried on. */
+  let chatPicks: SkillToolPicks | undefined
+  /** The suggestion being worked out for the chat box; a newer request stops it. */
+  let completionAbort: AbortController | undefined
+  /** Set by a turn that stopped at the context limit; the handoff starts once that turn has finished. */
+  let handoffAtLimit = false
   let cachedStallSeconds = DEFAULT_STALL_SECONDS
   let cachedRetries = DEFAULT_RETRIES
   // Mirrors packages/ui's DEFAULT_ACCENT. Duplicated rather than imported because core
@@ -2576,14 +2750,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
       : undefined
   /** Every hub `hub_browse` may look around: this codebase's own, then those of the codebases beside it. */
+  const siblingHubClients = (services.siblingHubs ?? []).map(({ name, spec }) => ({
+    name,
+    spec,
+    label: `${name}'s hub (${spec.user}@${hostLabel(spec.url)}${spec.server !== undefined ? `, server ${spec.server}` : ''})`,
+    client: new JupyterClient(httpClient, spec, () => secrets.get(spec.tokenRef), () => hubTls(spec)),
+  }))
   const browsableHubs: BrowsableHub[] = [
     ...(hub !== undefined ? [{ name: 'this', label: `${hub.label}, this codebase's hub`, client: hub.client }] : []),
-    ...(services.siblingHubs ?? []).map(({ name, spec }) => ({
-      name,
-      label: `${name}'s hub (${spec.user}@${hostLabel(spec.url)})`,
-      client: new JupyterClient(httpClient, spec, () => secrets.get(spec.tokenRef), () => hubTls(spec)),
-    })),
+    ...siblingHubClients.map(({ name, label, client }) => ({ name, label, client })),
   ]
+  /*
+   * The other codebases' hubs, for hub_run and hub_inspect with `hub` (asked for: inspect the libraries on another
+   * codebase's named server). A kernel of this session's own on each, started only when first used and shut down
+   * with the session - that codebase's chat and kernel are never touched.
+   */
+  const otherHubs: OtherHub[] = siblingHubClients.map(({ name, label, client, spec }) => ({ name, label, kernel: new KernelSession(client, spec.kernel) }))
   // A hub copy cannot see the hub's libraries, so "import could not be resolved" is always wrong there.
   const diagnosticsProvider: DiagnosticsProvider | undefined =
     hub !== undefined && anyDiagnostics !== undefined ? withoutMissingImports(anyDiagnostics) : anyDiagnostics
@@ -3068,6 +3250,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedModeId = config.modeId
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAutoCompact = config.autoCompact === true
+    cachedAutoHandoff = config.autoHandoff === true
+    cachedUnlimitedSteps = config.unlimitedSteps === true
+    cachedComposerCompletion = config.composerCompletion === true
+    cachedDecision = config.decisionModel
+    // The web chat's saved capture: read here so the Chrome server is withheld from the agent from the first message.
+    await loadWebChat()
+    cachedDecisionLabel = decisionModelFrom(config)?.label
     cachedStallSeconds = config.connection?.stallSeconds ?? DEFAULT_STALL_SECONDS
     cachedRetries = config.connection?.retries ?? DEFAULT_RETRIES
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
@@ -3257,6 +3446,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       approvals,
       maxIterations: cachedMaxIterations,
       autoCompact: cachedAutoCompact,
+      autoHandoff: cachedAutoHandoff,
+      unlimitedSteps: cachedUnlimitedSteps,
+      composerCompletion: cachedComposerCompletion,
+      ...(cachedDecisionLabel !== undefined ? { decisionLabel: cachedDecisionLabel } : {}),
       stallSeconds: cachedStallSeconds,
       retries: cachedRetries,
       accentColor: cachedAccentColor,
@@ -3460,11 +3653,66 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     mcpJson = JSON.stringify({ mcpServers: servers }, null, 2)
   }
 
+  /*
+   * What the chat is still getting ready, for the bar over the message box. The parts the warm-up starts are tracked by
+   * name; MCP servers are read from the registry - only those still starting with no tools remembered from an earlier
+   * session, since a server whose tools are remembered does not hold anything up.
+   */
+  const startupWaits = new Map<string, number>()
+  /** What a part is doing now ("reading <folder>"), shown after its name. */
+  const startupDetails = new Map<string, string>()
+  function startupStep(label: string, detail: string | undefined): void {
+    if (detail === undefined) startupDetails.delete(label)
+    else startupDetails.set(label, detail)
+    postStartupProgress()
+  }
+  /** One step that took long enough to matter, named in the log so a slow start can be traced to its cause. */
+  function noteSlowStep(step: string, tookMs: number): void {
+    if (tookMs >= 2_000) logger.info(`[startup] ${step} took ${(tookMs / 1000).toFixed(1)}s`)
+  }
+  const mcpStartingSince = new Map<string, number>()
+  let lastStartupPosted = ''
+  function postStartupProgress(force = false): void {
+    const now = Date.now()
+    let states: ReturnType<McpRegistry['states_']> = []
+    try {
+      states = mcp.states_()
+    } catch {
+      // Not constructed yet: nothing to report for MCP.
+    }
+    const blocking = new Set(states.filter((state) => state.enabled && state.status === 'connecting' && state.tools.length === 0).map((state) => state.name))
+    for (const name of [...mcpStartingSince.keys()]) if (!blocking.has(name)) mcpStartingSince.delete(name)
+    for (const name of blocking) if (!mcpStartingSince.has(name)) mcpStartingSince.set(name, now)
+    const waiting = [
+      ...[...mcpStartingSince].map(([name, since]) => ({ label: `MCP server "${name}" starting`, since })),
+      ...[...startupWaits].map(([label, since]) => {
+        const full = startupDetails.has(label) ? `${label} - ${startupDetails.get(label) ?? ''}` : label
+        // Paths cut to their last two parts on the bar; the whole of it on hover.
+        const short = shortenPaths(full)
+        return { label: short, since, ...(short !== full ? { full } : {}) }
+      }),
+    ].sort((a, b) => a.since - b.since)
+    const key = JSON.stringify(waiting)
+    if (!force && key === lastStartupPosted) return
+    lastStartupPosted = key
+    post({ type: 'startupProgress', waiting })
+  }
+  function trackStartup<T>(label: string, work: Promise<T>): Promise<T> {
+    startupWaits.set(label, Date.now())
+    postStartupProgress()
+    return work.finally(() => {
+      startupWaits.delete(label)
+      startupDetails.delete(label)
+      postStartupProgress()
+    })
+  }
+
   const mcp = new McpRegistry(
     secrets,
     {
       onStateChanged: () => {
         postMcp()
+        postStartupProgress()
         /*
          * The schedule tool picker is built from the live registry, and MCP servers connect
          * seconds *after* the panel opens — the UI asks for schedules once, on mount, so it
@@ -3496,6 +3744,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         return true
       }
     },
+    // Shared by every chat of a codebase in Fire Code (`codebaseDir`), so a chat starting after a crash or a
+    // sleep offers the servers' tools at once instead of waiting for each to start (`mcp/toolCache.ts`).
+    fileMcpToolCache(mcpToolCacheFile(services.codebaseDir ?? storageDir)),
   )
 
   function postMcp(): void {
@@ -3616,7 +3867,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * the approval gate still apply exactly as before, because the loop unwraps `call_tool`
      * before either of them runs.
      */
+    // The web chat's Chrome server is Light Code's own once the web chat is set up: the agent never gets its tools.
+    // Only the server chosen for the web chat is withheld; any other Chrome server stays as the user had it.
+    const chrome = webChatServer()
+    mcp.reserve(chrome !== undefined ? [chrome] : [])
     for (const tool of mcp.enabledTools()) combined.register(tool, { dispatchOnly: dispatcher })
+    // Offered only while the web chat's Chrome DevTools MCP server is connected, never on a shared server.
+    if (chrome !== undefined && webChatFile !== undefined && cachedWebChat !== undefined) combined.register(createAskWebChatTool(webChatTool))
     /*
      * Python tools are adapted into the ordinary Tool interface, exactly as MCP tools are.
      * That is the design choice that matters: the loop, the approval gate and mode filtering
@@ -3729,8 +3986,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         )
       }
     }
-    if (hub !== undefined) {
-      for (const tool of createHubTools(hub)) combined.register(tool)
+    if (hub !== undefined || otherHubs.length > 0) {
+      for (const tool of createHubTools(hub, otherHubs)) combined.register(tool)
+    }
+    if (services.codebaseAgents !== undefined && (services.siblings?.length ?? 0) > 0) {
+      combined.register(createAskCodebaseAgentTool({ channel: services.codebaseAgents, codebases: services.siblings ?? [], depth: () => workingForDepth }))
     }
     const hubBrowse = createHubBrowseTool(browsableHubs)
     if (hubBrowse !== undefined) combined.register(hubBrowse)
@@ -4004,6 +4264,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      */
     // Constructed only when something will use it: a bridge object built for a feature nobody
     // switched on is a disposal path that has to stay correct for no benefit.
+    /*
+     * Setting up a DevOps connection with the assistant (`tools/devopsSetup.ts`): offered whether or not anything is set
+     * up, because setting it up is the point. Saved and tested through the panel's own functions.
+     */
+    if (services.sharedServer !== true) {
+      combined.register(createDevopsSetupTool({ status: atlassianStatus, save: saveAtlassianSettings, test: testAtlassian }))
+    }
     if (officeAvailable() && (cachedOffice.excel === true || cachedOffice.outlook === true)) {
       const officeOptions = { bridge: office() }
       if (cachedOffice.excel === true) {
@@ -4022,6 +4289,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         combined.register(createExcelCreateTool(officeOptions))
         combined.register(createExcelSaveTool(officeOptions))
         combined.register(createExcelSheetsTool(officeOptions))
+        combined.register(createExcelChartTool(officeOptions))
+        combined.register(createExcelPivotTool(officeOptions))
         combined.register(createExcelCheckMacroTool(officeOptions))
         combined.register(createExcelEvaluateTool(officeOptions))
         combined.register(createExcelCalculateTool(officeOptions))
@@ -4297,8 +4566,6 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         }),
       )
     }
-    // Captured for `consultAgent`, which is outside this closure. See the declaration.
-    agentBriefingTools = () => combined.list()
     lastToolNames = combined.list().map((tool) => tool.name)
     return combined
   }
@@ -4741,6 +5008,405 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     return strategy
   }
 
+  // ─── The web chat (Settings → Agents → Web chat; `webchat/`) ──────────────────────────────────────
+
+  /** One per Windows user, beside the personal skills and tools; none on a shared server. */
+  const webChatFile = services.personalDir !== undefined ? webChatSetupFile(services.personalDir) : undefined
+  let cachedWebChat: WebChatSetup | undefined
+  /** The capture under way: the phrase looked for, and what was found, until approved or cancelled. */
+  let webChatCapture: { pageUrl: string; server: string; pageId: number | undefined; phrase: string; startedAt: number; candidates: CaptureCandidate[]; timer?: ReturnType<typeof setInterval> } | undefined
+  const webChatHostChecks = new Map<string, { at: number; problem: string | undefined }>()
+
+  async function loadWebChat(): Promise<WebChatSetup | undefined> {
+    cachedWebChat = webChatFile === undefined ? undefined : await readWebChatSetup(webChatFile)
+    return cachedWebChat
+  }
+
+  /** Every connected Chrome DevTools MCP server, by name - the ones that can be chosen for the web chat. */
+  function chromeServers(): string[] {
+    return mcp
+      .states_()
+      .filter((state) => state.enabled && state.status === 'ready' && isChromeDevToolsServer(state.tools.map((tool) => tool.name)))
+      .map((state) => state.name)
+  }
+
+  /**
+   * The server dedicated to the web chat - the one chosen in Settings (or for the capture under way) - when it is
+   * connected. Only this one is used for the web chat and withheld from the assistant; every other Chrome server is left
+   * exactly as it was.
+   */
+  function webChatServer(): string | undefined {
+    const chosen = webChatCapture?.server ?? cachedWebChat?.server
+    return chosen !== undefined && chromeServers().includes(chosen) ? chosen : undefined
+  }
+
+  function chromeAccess(server: string): ChromeAccess {
+    return {
+      server,
+      call: (tool, args) => mcp.callServerTool(server, tool, args),
+      schema: (tool) => mcp.serverTools(server).find((entry) => entry.name === tool)?.inputSchema,
+    }
+  }
+
+  /**
+   * npm's registry, for a Chrome server started with npx: where npx downloads from (the user's .npmrc, the organisation's
+   * Artifactory), and why it is not inside the network if it is not. Asked of npm itself, at most every ten minutes.
+   */
+  let npmRegistryCheck: { at: number; value: string | undefined } | undefined
+  async function npmRegistry(): Promise<string | undefined> {
+    if (npmRegistryCheck !== undefined && Date.now() - npmRegistryCheck.at < 600_000) return npmRegistryCheck.value
+    const registry = await new Promise<string | undefined>((resolve) => {
+      const child = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['config', 'get', 'registry'], { windowsHide: true, shell: process.platform === 'win32', ...(workspaceRoot !== undefined ? { cwd: workspaceRoot } : {}) })
+      let out = ''
+      child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')))
+      child.on('error', () => resolve(undefined))
+      child.on('close', (code) => resolve(code === 0 ? out.trim() : undefined))
+      setTimeout(() => child.kill(), 15_000).unref?.()
+    })
+    const value = registry === undefined || registry.length === 0 ? undefined : registry
+    npmRegistryCheck = { at: Date.now(), value }
+    return value
+  }
+
+  /** The Chrome server's problems for the web chat, with npm's registry checked when it runs through npx. */
+  async function chromeProblems(server: string): Promise<string[]> {
+    const config = mcp.serverConfig(server)
+    const command = (config as { command?: string } | undefined)?.command ?? ''
+    const npx = /(^|[\\/])npx(\.cmd)?$/i.test(command)
+    void npx
+    return chromeServerProblems(config)
+  }
+
+  /** Where an npx-started server downloads from, for the panel to show - npm's own answer, never judged here. */
+  async function npxRegistryFor(server: string): Promise<{ registry?: string }> {
+    const command = (mcp.serverConfig(server) as { command?: string } | undefined)?.command ?? ''
+    if (!/(^|[\\/\s])npx(\.cmd)?(\s|$)/i.test(command)) return {}
+    const registry = await npmRegistry()
+    return registry !== undefined ? { registry } : {}
+  }
+
+  /** Rule 4 of guard.ts: the page address is a web address. */
+  async function hostProblem(pageUrl: string): Promise<string | undefined> {
+    const known = webChatHostChecks.get(pageUrl)
+    if (known !== undefined && Date.now() - known.at < 600_000) return known.problem
+    const problem = webChatAddressProblem(pageUrl)
+    webChatHostChecks.set(pageUrl, { at: Date.now(), problem })
+    return problem
+  }
+
+  /** Every rule in guard.ts for this page: the first sentence that stops it, or undefined. */
+  async function webChatProblem(pageUrl: string, server: string | undefined): Promise<string | undefined> {
+    if (server === undefined) return 'The Chrome DevTools MCP server chosen for the web chat is not connected (Settings → Agents → Web chat, and Settings → MCP).'
+    const problems = await chromeProblems(server)
+    if (problems.length > 0) return `The Chrome DevTools MCP server "${server}" may not be used for the web chat: ${problems.join(' ')}`
+    return hostProblem(pageUrl)
+  }
+
+  const webChatTool = {
+    destination: async () => {
+      const setup = cachedWebChat ?? (await loadWebChat())
+      if (setup === undefined) return undefined
+      const backend = new URL(setup.request.path, new URL(setup.pageUrl).origin).href
+      const model = setup.modelOverride ?? setup.model
+      return { backend, ...(model !== undefined ? { model } : {}) }
+    },
+    problem: async () => {
+      const setup = cachedWebChat ?? (await loadWebChat())
+      return setup === undefined ? 'The web chat is not set up.' : webChatProblem(setup.pageUrl, webChatServer())
+    },
+    ask: async (question: string) => {
+      const setup = cachedWebChat ?? (await loadWebChat())
+      const server = webChatServer()
+      if (setup === undefined || server === undefined) throw new Error('The web chat or its Chrome DevTools MCP server is not available.')
+      return askWebChat(chromeAccess(server), setup, question)
+    },
+  }
+
+  async function postWebChat(message?: string): Promise<void> {
+    const setup = await loadWebChat()
+    const servers = chromeServers()
+    post({
+      type: 'webChat',
+      available: webChatFile !== undefined,
+      ...(setup !== undefined
+        ? {
+            setup: {
+              pageUrl: setup.pageUrl,
+              backend: new URL(setup.request.path, new URL(setup.pageUrl).origin).href,
+              method: setup.request.method,
+              ...(setup.model !== undefined ? { model: setup.model } : {}),
+              ...(setup.modelOverride !== undefined ? { modelOverride: setup.modelOverride } : {}),
+              fromPage: setup.request.fromPage,
+              capturedAt: setup.capturedAt,
+            },
+          }
+        : {}),
+      chrome: {
+        servers: await Promise.all(servers.map(async (name) => ({ name, problems: await chromeProblems(name), ...(await npxRegistryFor(name)) }))),
+        ...(setup?.server !== undefined ? { chosen: setup.server } : {}),
+      },
+      ...(setup !== undefined ? { hostProblem: (await hostProblem(setup.pageUrl).catch((error: unknown) => String(error))) ?? '' } : {}),
+      ...(message !== undefined ? { message } : {}),
+    })
+  }
+
+  function stopWebChatCapture(): void {
+    if (webChatCapture?.timer !== undefined) clearInterval(webChatCapture.timer)
+    webChatCapture = undefined
+  }
+
+  /** Starts the capture: checks every rule, opens or selects the chat tab, and watches for the phrase. */
+  async function startWebChatCapture(pageUrl: string, chosen: string): Promise<void> {
+    stopWebChatCapture()
+    const problem = await webChatProblem(pageUrl, chromeServers().includes(chosen) ? chosen : undefined)
+    if (problem !== undefined) {
+      post({ type: 'webChatCapture', phase: 'failed', message: problem })
+      return
+    }
+    const server = chosen
+    const chrome = chromeAccess(server)
+    const origin = new URL(pageUrl).origin
+    const phrase = capturePhrase()
+    // Reserved from now on: the assistant cannot drive the web chat's Chrome server. Any other is left as it was.
+    mcp.reserve([server])
+    const pageId = await selectWebChatPage(chrome, pageUrl)
+    const installed = await runScript(chrome, watchScript(origin, phrase), pageId)
+    if (installed['ok'] !== true) {
+      post({ type: 'webChatCapture', phase: 'failed', message: String(installed['error'] ?? 'The page could not be watched.') })
+      return
+    }
+    webChatCapture = { pageUrl, server, pageId, phrase, startedAt: Date.now(), candidates: [] }
+    post({ type: 'webChatCapture', phase: 'waiting', phrase })
+    const capture = webChatCapture
+    let polling = false
+    // An error that keeps coming back ends the capture and is shown - before, it was only logged, and the panel waited
+    // for three minutes saying nothing (reported: an evaluate_script argument error surfaced only by chance).
+    let failures = 0
+    capture.timer = setInterval(() => {
+      if (polling || webChatCapture !== capture) return
+      polling = true
+      void (async () => {
+        try {
+          if (Date.now() - capture.startedAt > 180_000) {
+            stopWebChatCapture()
+            post({ type: 'webChatCapture', phase: 'failed', message: 'Nothing carrying the phrase was seen in three minutes. Send it in the web chat tab Light Code opened (a new chat), then capture again.' })
+            return
+          }
+          const read = await runScript(chrome, readCaptureScript(origin), capture.pageId)
+          failures = 0
+          if (read['ok'] !== true) {
+            capture.pageId = await selectWebChatPage(chrome, pageUrl)
+            return
+          }
+          if (read['ws'] === true) {
+            stopWebChatCapture()
+            post({ type: 'webChatCapture', phase: 'failed', message: 'This web chat sends messages over a WebSocket, which cannot be replayed safely - so the web chat cannot be used this way.' })
+            return
+          }
+          const found = Array.isArray(read['found']) ? (read['found'] as CapturedRequest[]) : []
+          if (found.length === 0) return
+          const { candidates, refused } = candidatesFrom(found, pageUrl, capture.phrase)
+          if (candidates.length === 0) {
+            stopWebChatCapture()
+            post({ type: 'webChatCapture', phase: 'failed', message: refused.length > 0 ? refused.join(' ') : 'The request carrying the phrase could not be used.' })
+            return
+          }
+          if (capture.timer !== undefined) clearInterval(capture.timer)
+          capture.candidates = candidates
+          post({
+            type: 'webChatCapture',
+            phase: 'found',
+            candidates: candidates.map((candidate) => ({
+              backend: candidate.backend,
+              method: candidate.method,
+              ...(candidate.model !== undefined ? { model: candidate.model } : {}),
+              answerPreview: candidate.answerPreview,
+              fromPage: candidate.fromPage,
+            })),
+            refused,
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          logger.warn(`web chat capture: ${message}`)
+          failures += 1
+          if (failures >= 3 && webChatCapture === capture) {
+            stopWebChatCapture()
+            post({ type: 'webChatCapture', phase: 'failed', message })
+          }
+        } finally {
+          polling = false
+        }
+      })()
+    }, 1500)
+  }
+
+  // ─── The decision model (Settings → Agents; `decision/`) ──────────────────────────────────────────
+
+  /**
+   * The decision model, when Settings → Agents names an OpenAI-compatible profile that still exists - otherwise
+   * nothing about it exists: no routing, no loop verdicts, nothing shown. Its own auth strategy, beside the observers',
+   * so asking it never throws away the chat's token.
+   */
+  function decisionModelFrom(config: LightCodeConfig): { model: DecisionModel; label: string } | undefined {
+    const id = config.decisionModel?.profileId
+    if (id === undefined) return undefined
+    const profile = (config.profiles ?? []).find((candidate) => candidate.id === id)
+    if (profile === undefined || profile.wireFormat !== 'openai') return undefined
+    const endpoint = config.decisionModel?.endpoint
+    return { model: { profile, http: httpClient, auth: observerStrategy(config, profile), ...(endpoint !== undefined && endpoint.trim() !== '' ? { endpoint: endpoint.trim() } : {}) }, label: profile.label }
+  }
+
+  /** One question, recorded in the audit record with its probabilities and what was done with it. */
+  async function askDecisionModel(
+    purpose: string,
+    question: DecisionQuestion,
+    outcome: (decision: Decision) => string,
+    signal?: AbortSignal,
+    timeoutMs = 10_000,
+  ): Promise<Decision | undefined> {
+    const found = decisionModelFrom(await loadSettings())
+    if (found === undefined) return undefined
+    const decision = await decide(found.model, question, { ...(signal !== undefined ? { signal } : {}), timeoutMs })
+    if (!decision.ok) logger.info(`decision model (${purpose}): ${decision.error ?? 'no answer'}`)
+    observerHub.event({
+      kind: 'decision',
+      at: Date.now(),
+      purpose,
+      question: question.question,
+      outcome: outcome(decision),
+      ...(decision.probabilities !== undefined ? { probabilities: decision.probabilities } : {}),
+    })
+    return decision
+  }
+
+  async function postDecisionModel(error?: string): Promise<void> {
+    const config = await loadSettings()
+    const found = decisionModelFrom(config)
+    post({
+      type: 'decisionModel',
+      settings: config.decisionModel ?? {},
+      profiles: (config.profiles ?? []).filter((profile) => profile.wireFormat === 'openai').map((profile) => ({ id: profile.id, label: profile.label })),
+      ...(found !== undefined ? { label: found.label } : {}),
+      ...(error !== undefined ? { error } : {}),
+    })
+  }
+
+  /** Two sample questions, so the first real call shows whether this deployment's answers can be read. */
+  async function testDecisionModel(): Promise<void> {
+    const found = decisionModelFrom(await loadSettings())
+    if (found === undefined) {
+      post({ type: 'decisionModelTest', results: [{ question: 'Pick a profile first.', expected: '', ok: false, source: 'none', error: 'No decision model is set up.', raw: '', ms: 0 }] })
+      return
+    }
+    const samples: { question: DecisionQuestion; expected: string }[] = [
+      { question: { kind: 'yesno', question: 'Is the number in the input even?', inputs: { text: '42' } }, expected: 'yes' },
+      {
+        question: {
+          kind: 'choice',
+          question: 'Which specialist should handle this request?',
+          options: [
+            { id: 'tester', label: 'Tester', description: 'writes and runs tests' },
+            { id: 'writer', label: 'Writer', description: 'writes documentation' },
+            { id: 'dba', label: 'Database expert', description: 'SQL and schemas' },
+          ],
+          inputs: { text: 'Write unit tests for the date parser and run them.' },
+        },
+        expected: 'tester',
+      },
+    ]
+    const results: DecisionTestResult[] = []
+    for (const sample of samples) {
+      const decision = await decide(found.model, sample.question, { timeoutMs: 20_000 })
+      results.push({
+        question: `${sample.question.question} (${sample.question.inputs?.text ?? ''})`,
+        expected: sample.expected,
+        ok: decision.ok,
+        source: decision.source,
+        ...(decision.probabilities !== undefined ? { probabilities: decision.probabilities } : {}),
+        ...(decision.error !== undefined ? { error: decision.error } : {}),
+        raw: decision.raw,
+        ms: decision.ms,
+      })
+    }
+    post({ type: 'decisionModelTest', results })
+  }
+
+  /**
+   * Agent team mode: the specialist the decision model sends this message to, or undefined (the main assistant, not
+   * sure enough, or no decision model). Never under a strategy - the strategy already says who acts.
+   */
+  async function routeMessage(text: string, signal: AbortSignal): Promise<{ role: string; name: string; probability: number } | undefined> {
+    const settings = cachedDecision
+    if (settings?.profileId === undefined || settings.routing === false || activeStrategy !== undefined) return undefined
+    const team = cachedTeam.filter((agent) => agent.available)
+    if (team.length === 0 || text.trim().length === 0) return undefined
+    const threshold = settings.routeThreshold ?? DEFAULT_ROUTE_THRESHOLD
+    const decision = await askDecisionModel(
+      'Agent team routing',
+      routeQuestion(text, team, conversation.toArray()),
+      (d) => {
+        const routed = routedRole(d, threshold)
+        if (!d.ok) return `not used: ${d.error ?? 'no answer'}`
+        if (routed !== undefined) return `routed to ${routed.role}`
+        return `main assistant (best ${d.best?.id ?? '?'} ${(d.best?.probability ?? 0).toFixed(2)}, threshold ${threshold.toFixed(2)})`
+      },
+      signal,
+    )
+    if (decision === undefined) return undefined
+    if (!decision.ok) {
+      post({ type: 'decisionRoute', note: `The decision model did not answer, so the main assistant decides who helps (${decision.error ?? 'no answer'}).` })
+      return undefined
+    }
+    const routed = routedRole(decision, threshold)
+    if (routed === undefined) {
+      post({ type: 'decisionRoute' })
+      return undefined
+    }
+    const name = team.find((agent) => agent.role === routed.role)?.name ?? routed.role
+    post({ type: 'decisionRoute', role: routed.role, name, probability: routed.probability })
+    return { ...routed, name }
+  }
+
+  /**
+   * A strategy loop's verdicts from the decision model, by edge id: for each back-and-forth this answer judges, with an
+   * "until" condition. Empty when there is no decision model, loop judging is off, or it is not sure either way.
+   */
+  async function judgeLoops(
+    strategy: Strategy,
+    role: string,
+    answer: string,
+    roleName: (r: string) => string,
+  ): Promise<Map<string, { met: boolean; detail: string }>> {
+    const judged = new Map<string, { met: boolean; detail: string }>()
+    const settings = cachedDecision
+    if (settings?.profileId === undefined || settings.judgeLoops === false) return judged
+    const threshold = settings.loopThreshold ?? DEFAULT_LOOP_THRESHOLD
+    await Promise.all(
+      strategy.edges.map(async (edge) => {
+        if (edge.twoWay !== true || edge.until === undefined || edge.until.trim().length === 0) return
+        const from = strategy.nodes.find((node) => node.id === edge.from)
+        const to = strategy.nodes.find((node) => node.id === edge.to)
+        if (from === undefined || to === undefined || to.role !== role || from.role === role) return
+        const work = latestStrategyAnswer(from.role) ?? ''
+        const decision = await askDecisionModel(
+          `Strategy loop ${roleName(from.role)} ⇄ ${roleName(to.role)}`,
+          {
+            kind: 'yesno',
+            question: `Is this condition met: "${edge.until}"?`,
+            inputs: { text: `Work handed in by ${roleName(from.role)}:\n${work.slice(0, 12_000)}\n\nReview by ${roleName(to.role)}:\n${answer.slice(0, 12_000)}` },
+          },
+          (d) => {
+            const verdict = loopVerdict(d, threshold)
+            return verdict === undefined ? `left to the wording of ${roleName(to.role)}` : verdict.met ? 'met' : 'not met'
+          },
+        )
+        const verdict = decision === undefined ? undefined : loopVerdict(decision, threshold)
+        if (verdict !== undefined) judged.set(edge.id, verdict)
+      }),
+    )
+    return judged
+  }
+
   /**
    * The TLS material for the Rust process, from the strategy - so from `resolveConnectionTls`, the one
    * resolver (§10). As PEM text: rustls takes no PFX and no encrypted key, so an encrypted key is decrypted
@@ -4861,7 +5527,28 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     },
     index: () => observerIndex,
     startAgent: startObserver,
+    // With a decision model (Settings → Agents) and its first pass on: steps it is sure of wait for the next review.
+    firstPass: (step, goal) => antiHallucinatorFirstPass(step, goal),
   })
+
+  /**
+   * The Anti Hallucinator's first pass: asked for as "does it work with anti halucinator too". A Yes/No question to the
+   * decision model about the step that just ended - grounded in its tool results, and still on the user's request? Sure
+   * at `firstPassThreshold` (default 0.85) means the full review waits for the next step; anything else is reviewed
+   * as always. No decision model, or the pass switched off: undefined, and every step is reviewed.
+   */
+  async function antiHallucinatorFirstPass(step: readonly ObservedEvent[], goal: string): Promise<boolean | undefined> {
+    const settings = cachedDecision
+    if (settings?.profileId === undefined || settings.firstPass === false) return undefined
+    const threshold = settings.firstPassThreshold ?? DEFAULT_FIRST_PASS_THRESHOLD
+    const decision = await askDecisionModel(
+      'Anti Hallucinator first pass',
+      { kind: 'yesno', question: FIRST_PASS_QUESTION, inputs: { text: describeStep(step, goal) } },
+      (d) => (d.probabilities?.['yes'] !== undefined && d.probabilities['yes'] >= threshold ? 'grounded: review waits' : 'reviewed'),
+    )
+    const yes = decision?.probabilities?.['yes']
+    return decision?.ok === true && yes !== undefined ? yes >= threshold : undefined
+  }
 
   let observerKey = ''
   let observerModelKey = ''
@@ -4933,6 +5620,64 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
     if (ui.openFile !== undefined) await ui.openFile(path.join(folder, newest))
     else ui.showInfo(`The audit journal is in ${folder} (newest: ${newest}).`)
+  }
+
+  // ─── The Files panel (`ArtifactsButton.tsx`, `artifacts/artifacts.ts`) ───
+
+  /** What the panel may offer: opening on this machine is the host's call, and absent on a shared server. */
+  function artifactOpens(): { open: boolean; reveal: boolean } {
+    return { open: ui.openWithDefaultApp !== undefined || ui.openFile !== undefined, reveal: ui.revealInFolder !== undefined }
+  }
+
+  async function handleRequestArtifacts(): Promise<void> {
+    if (workspaceRoot === undefined) {
+      post({ type: 'artifacts', error: 'No folder is open, so there are no files to show.', opens: artifactOpens() })
+      return
+    }
+    try {
+      const list = await listArtifacts({
+        fs: new NodeFileSystem(),
+        root: workspaceRoot,
+        since: activeTaskCreatedAt,
+        writes: agentWrites(conversation.toArray(), workspaceRoot),
+      })
+      post({ type: 'artifacts', list, opens: artifactOpens() })
+    } catch (error) {
+      post({ type: 'artifacts', error: `Could not list the files in ${workspaceRoot}: ${error instanceof Error ? error.message : String(error)}`, opens: artifactOpens() })
+    }
+  }
+
+  async function handleDescribeArtifact(relative: string): Promise<void> {
+    if (workspaceRoot === undefined) return
+    try {
+      const writes = agentWrites(conversation.toArray(), workspaceRoot).get(artifactKey(relative))
+      const info = await describeArtifact(workspaceRoot, relative, denylist, writes)
+      post({ type: 'artifactInfo', path: relative, info })
+    } catch (error) {
+      post({ type: 'artifactInfo', path: relative, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /**
+   * Open or reveal a listed file. Confined again here - the path comes from the panel - and refused for a
+   * denied path, so the panel cannot be used to open what no tool may read.
+   */
+  async function handleOpenArtifact(relative: string, how: 'open' | 'reveal'): Promise<void> {
+    if (workspaceRoot === undefined) return
+    const absolute = await confine(path.resolve(workspaceRoot, relative), workspaceRoot)
+    if (await denylist.isDenied(absolute)) {
+      ui.showWarning(`${relative} is on the deny list, so it is not opened.`)
+      return
+    }
+    if (how === 'reveal') {
+      if (ui.revealInFolder !== undefined) await ui.revealInFolder(absolute)
+      return
+    }
+    // Text and code open in the editor where there is one (VS Code); everything else in its usual program.
+    const editable = ['code', 'text', 'data'].includes(kindOf(absolute)) || /\.(md|markdown|csv|tsv|html?)$/i.test(absolute)
+    if (editable && ui.openFile !== undefined && ui.editsInPanel !== true) await ui.openFile(absolute)
+    else if (ui.openWithDefaultApp !== undefined) await ui.openWithDefaultApp(absolute)
+    else if (ui.openFile !== undefined) await ui.openFile(absolute)
   }
 
   // ─── Team admins and owners' approval (Settings → Project, Settings → Team reviews; `team/admins.ts`) ───
@@ -5268,6 +6013,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         : {}),
       runningRoles: [...strategyRunning],
       exchanges: strategyExchanges,
+      ...(cachedDecision?.profileId !== undefined ? { decisionModel: true } : {}),
+      ...(chatPicks !== undefined ? { skillToolPicks: chatPicks } : {}),
       problems: activeStrategy !== undefined ? strategyProblems(activeStrategy, new Set(roles), assigned) : [],
       roles: roles.map((role) => {
         const info = roleInfo(role, cachedAgentDefinitions)
@@ -5313,6 +6060,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     strategyProgress = {}
     strategyExchanges = []
     strategyLastRole = undefined
+    resetHandOvers()
     await persistActiveTask()
     await postStrategies()
   }
@@ -5428,7 +6176,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /** Writes the current conversation. Called after every turn, not only at the end. */
   async function persistActiveTask(): Promise<void> {
-    if (workspaceRoot === undefined || conversation.isEmpty()) return
+    if (workspaceRoot === undefined) return
+    const pending = pendingSteeringPath()
+    if (conversation.isEmpty()) {
+      /*
+       * No task is written for a chat with no message, so its plan and strategy go to a small file of their own - a
+       * strategy chosen for a new chat, or carried in by a handoff, survives a reload until the first message saves it.
+       */
+      if (pending !== undefined && backgroundRun !== true) {
+        await writePendingSteering(pending, {
+          ...(activePlan !== undefined ? { plan: activePlan, planProgress: activePlanProgress } : {}),
+          ...(activeStrategy !== undefined ? { strategy: activeStrategy, strategyProgress, strategyExchanges } : {}),
+          ...(chatPicks !== undefined ? { skillToolPicks: chatPicks } : {}),
+        }).catch((error: unknown) => logger.warn(`Could not keep this chat's plan and strategy: ${describeFailure(error, true)}`))
+      }
+      return
+    }
 
     if (activeTaskId === undefined) {
       await setActiveTaskId(randomUUID())
@@ -5445,14 +6208,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       updatedAt: Date.now(),
       messages,
       resultHandles: truncationStore.spilledHandles(),
+      ...(turnInFlight ? { turnRunning: true } : {}),
+      ...(crashResumes > 0 ? { crashResumes } : {}),
       ...(activePlan !== undefined && activePlan.trim().length > 0 ? { plan: activePlan } : {}),
       ...(Object.keys(activePlanProgress).length > 0 ? { planProgress: activePlanProgress } : {}),
       // The strategy this chat follows and where its loops stand, restored with it like the plan.
       ...(activeStrategy !== undefined ? { strategy: activeStrategy, strategyProgress, strategyExchanges } : {}),
+      ...(chatPicks !== undefined ? { skillToolPicks: chatPicks } : {}),
     }
 
     try {
       await taskStore.save(redactTask(task, await knownSecretValues()))
+      // The task carries the plan and strategy now; the file that kept them for the empty chat goes.
+      if (pending !== undefined && backgroundRun !== true) await clearPendingSteering(pending)
     } catch (error) {
       // A failed save must not take the conversation down with it — the user would lose
       // the turn they just had on top of the history they were already going to lose.
@@ -5502,33 +6270,65 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     activeTaskCreatedAt = task.createdAt
     truncationStore.startTask(task.resultHandles)
     /*
+     * Opened by hand: a turn it was cut off in is the user's to continue, not something to resume behind their back
+     * after some later crash while this chat sat idle. So the mark is cleared on disk now (`agent/resume.ts`).
+     */
+    crashResumes = 0
+    if (task.turnRunning === true || task.crashResumes !== undefined) {
+      const { turnRunning: _running, crashResumes: _resumes, ...settled } = task
+      void _running
+      void _resumes
+      void taskStore.save(settled).catch(() => undefined)
+    }
+    /*
      * The plan comes back with the conversation it belongs to.
      *
      * Leaving the previous chat's plan in place would be the worst of both: the assistant bound by
      * something this conversation never agreed, and the user with no reason to suspect it.
      */
-    activePlan = task.plan
-    // Pruned on the way in as well as on the way out: a task saved before a plan was edited by
-    // hand in the config file could otherwise restore progress for steps that no longer exist.
-    activePlanProgress = pruneProgress(activePlan, task.planProgress)
-    // Its strategy too; the specialists' processes belong to the chat they were in, so they start afresh.
-    activeStrategy = task.strategy
-    strategyProgress = task.strategyProgress ?? {}
-    strategyExchanges = task.strategyExchanges ?? []
-    strategyLastRole = undefined
-    stopRoleProcesses()
+    adoptSteering(task)
     await setActiveTaskId(task.id)
 
     post({ type: 'taskRestored', taskId: task.id, entries: toTranscript(task.messages) })
-    post({ type: 'plan', plan: activePlan ?? '' })
-    postPlanProgress()
-    void postStrategies()
+    postSteering()
     await postTasks()
   }
 
-  async function startNewTask(): Promise<void> {
+  /**
+   * Puts back what steers a chat besides its conversation - its plan and its strategy, with where each stands. One
+   * function for every way a chat comes back: opened from History, reloaded with the window, and a Fire Code chat
+   * restarted after a sleep or a crash. The reload path restored the conversation alone, so the strategy was lost
+   * whenever the window reloaded or a chat woke up - reported as the strategy not staying with its chat.
+   */
+  function adoptSteering(source: ChatSteering): void {
+    activePlan = source.plan
+    // Pruned on the way in as well as on the way out: a task saved before a plan was edited by
+    // hand in the config file could otherwise restore progress for steps that no longer exist.
+    activePlanProgress = pruneProgress(activePlan, source.planProgress)
+    // Its strategy too; the specialists' processes belong to the chat they were in, so they start afresh.
+    activeStrategy = source.strategy
+    strategyProgress = source.strategyProgress ?? {}
+    chatPicks = source.skillToolPicks
+    strategyExchanges = source.strategyExchanges ?? []
+    strategyLastRole = undefined
+    resetHandOvers(0)
+    stopRoleProcesses()
+  }
+
+  function postSteering(): void {
+    post({ type: 'plan', plan: activePlan ?? '' })
+    postPlanProgress()
+    void postStrategies()
+    post({ type: 'chatSkillToolPicks', value: chatPicks ?? 'off' })
+  }
+
+  /** Where a chat that has no message yet keeps its plan and strategy (`agent/chatSteering.ts`). */
+  const pendingSteeringPath = (): string | undefined => (workspaceRoot === undefined ? undefined : pendingSteeringFile(storageDir, workspaceRoot))
+
+  async function startNewTask(options: { keepStrategy?: Strategy | undefined; keepPicks?: SkillToolPicks | undefined } = {}): Promise<void> {
     // The current task is already saved after each turn, so nothing needs flushing here.
     conversation.reset()
+    crashResumes = 0
     readFiles.clear()
     readStamps.clear()
     changedFiles.clear()
@@ -5542,13 +6342,24 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // constrain work nobody had scoped yet.
     activePlan = undefined
     activePlanProgress = {}
-    // A new chat starts with no strategy (one is chosen from the library) and fresh specialists.
-    activeStrategy = undefined
+    // A new chat starts with no strategy, or the one it was started from (+), and fresh specialists either way.
+    activeStrategy = options.keepStrategy
+    // The skill-and-tool switch goes with the chat it was set in into one started from it (+), and nowhere else.
+    chatPicks = options.keepPicks
     strategyProgress = {}
     strategyExchanges = []
     strategyLastRole = undefined
+    resetHandOvers()
     stopRoleProcesses()
     await setActiveTaskId(undefined)
+    // And nothing waiting from a strategy chosen for the last empty chat: a new chat starts with none.
+    // Not for a scheduled run's set-aside conversation: the user's own empty chat keeps what it had chosen. A kept
+    // strategy is written for the empty chat, so a reload before its first message keeps it too.
+    const pending = pendingSteeringPath()
+    if (pending !== undefined && backgroundRun !== true) {
+      if (options.keepStrategy !== undefined || options.keepPicks !== undefined) await persistActiveTask()
+      else await clearPendingSteering(pending)
+    }
 
     post({ type: 'taskRestored', taskId: undefined, entries: [] })
     post({ type: 'plan', plan: '' })
@@ -5565,9 +6376,71 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * message, so what was carried over is on screen. Progress is posted throughout, because writing the
    * note takes as long as any long reply. A failure or a cancel leaves the current chat exactly as it was.
    */
+  /**
+   * Runs one turn as if the user had typed `text`: what a sent message does, and what a finished handoff does
+   * with its opening message. `text` may be a function, composed only once any scheduled run is out of the way.
+   */
+  function startUserTurn(text: string | (() => string), images?: ImageAttachmentInput[], onSettled?: () => void): void {
+    void (async () => {
+      /*
+       * Wait rather than refuse. A scheduled run holds the conversation for a few seconds;
+       * rejecting the user's message for that window would look like the composer had
+       * swallowed it, and interleaving the two would corrupt both transcripts.
+       */
+      if (scheduledRunInFlight !== undefined) {
+        logger.info('holding the message until the scheduled run finishes')
+        await scheduledRunInFlight
+      }
+      userTurnRunning = true
+      userTurnWindingDown = false
+      const turn = handleSendMessage(typeof text === 'string' ? text : text(), images)
+      userTurnSettled = turn.then(
+        () => undefined,
+        () => undefined,
+      )
+      try {
+        await turn
+      } finally {
+        userTurnRunning = false
+        userTurnWindingDown = false
+        onSettled?.()
+        // The turn stopped at the context limit with automatic handoff on: write the handoff now; its chat carries on.
+        if (handoffAtLimit) {
+          handoffAtLimit = false
+          void handleHandoff()
+        }
+      }
+    })()
+  }
+
+  /**
+   * How many asks deep this chat's work is: 0 for the user's own chat, n when it was opened for another codebase's
+   * agent asking at depth n - so a chain of agents asking agents stops (`agents/codebaseAgents.ts`).
+   */
+  let workingForDepth = 0
+
+  /*
+   * Another codebase's agent asked this chat something (Fire Code opened this tab for it). The request becomes this
+   * chat's first message and its turn starts at once; when the turn ends, its answer goes back. Everything an ordinary
+   * turn has applies - approvals here, in this tab, the step cap, saving as it goes.
+   */
+  services.codebaseAgents?.onTask((task) => {
+    const channel = services.codebaseAgents
+    if (channel === undefined) return
+    if (userTurnRunning || activeAbortController !== undefined || scheduledRunInFlight !== undefined) {
+      channel.done(task.id, { ok: false, text: 'That chat was busy with another turn. Ask again.' })
+      return
+    }
+    workingForDepth = task.depth
+    const text = composeTaskMessage(task)
+    post({ type: 'taskRestored', taskId: activeTaskId, entries: toTranscript([...conversation.toArray(), { role: 'user', content: text }]) })
+    post({ type: 'hostTurnStarted' })
+    startUserTurn(text, undefined, () => channel.done(task.id, answerFromConversation(conversation.toArray())))
+  })
+
   async function handleHandoff(): Promise<void> {
     if (handoffAbort !== undefined) return
-    const progress = (phase: 'gathering' | 'writing' | 'starting' | 'done' | 'failed' | 'cancelled', extra: { written?: number; message?: string } = {}): void =>
+    const progress = (phase: 'gathering' | 'writing' | 'starting' | 'done' | 'failed' | 'cancelled', extra: { written?: number; message?: string; continuing?: boolean } = {}): void =>
       post({ type: 'handoffProgress', phase, ...extra })
     // A reply that has said it is done is only saving: wait for that rather than refuse.
     if (userTurnRunning && userTurnWindingDown && userTurnSettled !== undefined) {
@@ -5640,15 +6513,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       progress('starting')
       // The same work continues in the new chat, so its strategy and what passed under it come too.
       const carried = { strategy: activeStrategy, progress: strategyProgress, exchanges: strategyExchanges }
-      await startNewTask()
+      await startNewTask({ keepPicks: chatPicks })
       activeStrategy = carried.strategy
       strategyProgress = carried.progress
       strategyExchanges = carried.exchanges
-      conversation.addUserMessage(composeHandoff(note, facts, previousTitle))
+      /*
+       * The new chat carries on by itself (asked for: "after new session started, i had to send a message to keep the
+       * conversation running"). The handoff is its first message, sent through the ordinary turn - the path a typed
+       * message takes, so approvals, the step cap and saving as it goes all apply - instead of waiting to be prompted.
+       */
+      const opening = composeHandoff(note, facts, previousTitle)
       await persistActiveTask()
-      post({ type: 'taskRestored', taskId: activeTaskId, entries: toTranscript(conversation.toArray()) })
+      post({ type: 'taskRestored', taskId: activeTaskId, entries: toTranscript([{ role: 'user', content: opening }]) })
       await postTasks()
-      progress('done')
+      progress('done', { continuing: true })
+      startUserTurn(opening)
     } catch (error) {
       if (abort.signal.aborted) progress('cancelled')
       else progress('failed', { message: `The handoff could not be written: ${error instanceof Error ? error.message : String(error)}. This chat is unchanged.` })
@@ -5666,8 +6545,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /** Restores the in-progress task when the panel loads, so a reload is not a data loss. */
   async function restoreActiveTaskOnLoad(): Promise<void> {
-    if (activeTaskId === undefined) {
+    /** A chat with no message yet: the plan and strategy chosen for it, if any. */
+    const restoreEmptyChat = async (): Promise<void> => {
+      /*
+       * Announced at once, before the file is read: a request arriving as the chat starts (another codebase's agent
+       * asking this one) shows its first message straight away, and a late empty announcement would wipe it from the
+       * page. The saved choice is applied only while nothing has happened in the chat meanwhile.
+       */
       post({ type: 'taskRestored', taskId: undefined, entries: [] })
+      const pending = pendingSteeringPath()
+      const steering = pending === undefined ? undefined : await readPendingSteering(pending)
+      if (steering === undefined || !conversation.isEmpty() || activeTaskId !== undefined || activeStrategy !== undefined || activePlan !== undefined) return
+      adoptSteering(steering)
+      postSteering()
+    }
+    if (activeTaskId === undefined) {
+      await restoreEmptyChat()
       return
     }
 
@@ -5675,14 +6568,39 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (task === undefined || task.workspaceRoot !== workspaceRoot) {
       // Deleted behind our back, or the remembered id belongs to another workspace.
       await setActiveTaskId(undefined)
-      post({ type: 'taskRestored', taskId: undefined, entries: [] })
+      await restoreEmptyChat()
       return
     }
 
     conversation.restore(task.messages)
     activeTaskCreatedAt = task.createdAt
     truncationStore.startTask(task.resultHandles)
+    restoredInterruptedTurn = task.turnRunning === true
+    crashResumes = typeof task.crashResumes === 'number' ? task.crashResumes : 0
+    // The plan and strategy come back with the conversation - they did not, on a reload or a chat waking up.
+    adoptSteering(task)
     post({ type: 'taskRestored', taskId: task.id, entries: toTranscript(task.messages) })
+    postSteering()
+  }
+
+  /**
+   * Starts again a turn the last run was cut off in, when the host was asked to (`agent/resume.ts`). Waits for the
+   * MCP servers first: the task may have been using their tools, and a turn started without them would not find them.
+   */
+  async function resumeInterruptedTurn(): Promise<void> {
+    const decision = resumeDecision({ asked: services.resumeInterrupted === true, turnWasRunning: restoredInterruptedTurn, resumesSoFar: crashResumes })
+    restoredInterruptedTurn = false
+    if (!decision.resume) {
+      if (decision.reason !== undefined) post({ type: 'error', message: decision.reason })
+      return
+    }
+    await mcpStarted
+    if (userTurnRunning || activeAbortController !== undefined || scheduledRunInFlight !== undefined) return
+    crashResumes++
+    logger.info(`continuing the turn the last run was cut off in (automatic resume ${String(crashResumes)})`)
+    post({ type: 'taskRestored', taskId: activeTaskId, entries: toTranscript([...conversation.toArray(), { role: 'user', content: RESUME_PROMPT }]) })
+    post({ type: 'hostTurnStarted' })
+    startUserTurn(RESUME_PROMPT)
   }
 
   /** The running turn's end report for the observers, so the `finally` and `catch` reach it. */
@@ -5710,6 +6628,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
 
     activeAbortController = new AbortController()
+    // A scheduled run works on a conversation set aside for it; only the chat's own turn can be resumed.
+    if (schedule === undefined) turnInFlight = true
     try {
       const config = await loadSettings()
 
@@ -5731,12 +6651,31 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         logger,
         services.languageModels,
       )
+      /*
+       * Everything below that waits on a process or the network is started now and awaited where it
+       * is needed, so the first message of a session waits for the slowest of them rather than for
+       * their sum (reported: the first reply in a Fire Code chat took very long, the rest were quick).
+       * The MCP servers and Python's worker are the slow ones; `warmUp` usually has them ready.
+       */
+      const windowReady = early(reportedWindowFor(config, profile))
+      const expertReady = early(resolveExpert(config))
+      const skillsReady = early(refreshSkills())
+      const instructionsReady = early(readCodebaseInstructions(codebaseInstructionsFile))
+      const toolsReady = early(
+        (async () => {
+          await syncMcpFromConfig(config)
+          // Servers with a remembered tool list keep starting in the background; see `McpRegistry.ensureReady`.
+          const still = await mcp.ensureReady()
+          if (still.length > 0) logger.info(`[startup] replying without waiting longer for MCP server(s) still starting: ${still.join(', ')}`)
+          await configurePython(config)
+        })(),
+      )
       const capabilities = withReportedWindow(
         resolveModelCapabilities(profile.model, profile.modelCapabilities),
-        await reportedWindowFor(config, profile),
+        await windowReady,
         profile.modelCapabilities,
       )
-      const expertCliInfo = await resolveExpert(config)
+      const expertCliInfo = await expertReady
       const search = await resolveSearch(config)
       const embedder = await resolveEmbedder(config)
       const codebaseIndex = codebaseIndexName(config)
@@ -5751,13 +6690,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const mailSearch = mailCollection === undefined ? undefined : await resolveMailSearch(config)
       // Listed once per turn so the tool description can name real indexes; a failure here
       // only costs the model that hint, never the tool.
-      const searchIndexes =
-        search?.opensearch !== undefined
-          ? await search.opensearch
-              .listIndexes()
-              .then((list) => list.map((i) => i.name))
-              .catch(() => [])
-          : []
+      const searchIndexes = search?.opensearch !== undefined ? await indexNamesFor(search.opensearch) : []
 
       // Rebuilt whenever the profile or expert availability changes, so the model can
       // answer "which model are you?" accurately and knows whether ask_expert exists.
@@ -5769,9 +6702,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * written during a turn therefore appears at the next one, which is what write_skill
        * tells the model.
        */
-      await refreshSkills()
+      await boundedWait(skillsReady, 'Skills')
       // Read every turn, like skills: an edit in another chat or in Fire Code's dialog applies to the next message.
-      const codebaseInstructions = renderCodebaseInstructions(await readCodebaseInstructions(codebaseInstructionsFile))
+      const codebaseInstructions = renderCodebaseInstructions(await instructionsReady)
 
       /*
        * Resolved once here and reused for the turn. The mode contributes both tool filtering
@@ -5779,6 +6712,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * consult an expert whose tool was filtered out would be worse than either alone.
        */
       const activeMode = findMode(config.modeId)
+      turnModeId = activeMode.id
       // A scheduled run is nobody's junior: it has no expert budget and no one delegating to it.
       juniorTurnWithoutExpert = activeMode.id === 'junior' && schedule === undefined
 
@@ -5829,6 +6763,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const desiredPrompt = buildSystemPrompt(workspaceRoot, {
         model: profile.model,
         providerLabel: profile.label,
+        providerBaseUrl: profile.baseUrl,
         expertAvailable: expertCliInfo !== undefined,
         // Named only when there is an index to prefer.
         mailIndexed: cachedMail.enabled === true && cachedOffice.outlook === true,
@@ -5990,11 +6925,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       })
       if (conversation.systemPrompt() !== desiredPrompt) conversation.setSystemPrompt(desiredPrompt)
 
-      // Lazy connect (§11): a configured-but-unused server costs nothing until a turn
-      // actually needs its tools. Failures are per-server and surface in the MCP tab.
-      await syncMcpFromConfig(config)
-      await mcp.ensureConnected()
-      await python.configure({ ...(config.python ?? {}), ...pythonFolders(config) })
+      // MCP servers (connected when the panel opened, §11) and Python's worker, started above.
+      // Failures are per-server and surface in the MCP tab.
+      // 45 s: MCP servers with no remembered tools are waited for that long already (`ensureReady`).
+      await boundedWait(toolsReady, 'Tools', 45)
 
       const toolContext: ToolExecutionContext = {
         fs: new NodeFileSystem(),
@@ -6120,8 +7054,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * than ignored, or the message simply does nothing unusual and the feature reads as broken.
        */
       const directed = findDirectedRoles(text, cachedTeam)
-      const direction = describeDirectedRoles(directed, cachedTeam)
-      const messageText =
+      /*
+       * Agent team with a decision model: a message nobody addressed with # goes to the specialist the decision model
+       * picks, when it is sure enough. Told to the main assistant the way #role is, so the consultation is the
+       * ordinary one - approvals, read-only roles, its own context. Never for a scheduled run.
+       */
+      const routed =
+        activeMode.id === 'agent-team' && schedule === undefined && directed.addressed.length === 0 && cachedDecision?.profileId !== undefined
+          ? await routeMessage(text, activeAbortController.signal).catch(() => undefined)
+          : undefined
+      const direction = [describeDirectedRoles(directed, cachedTeam), ...(routed !== undefined ? [describeRoute(routed.role, routed.name, routed.probability)] : [])]
+        .filter((part) => part.length > 0)
+        .join('\n\n')
+      let messageText =
         direction.length > 0
           ? `${attachMentions(text, mentions)}\n\n${direction}`
           : attachMentions(text, mentions)
@@ -6141,13 +7086,28 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // So images a tool returns (a Confluence page's pictures) reach a model that can see them.
         supportsVision: capabilities.supportsVision,
         // CLAUDE.md §5 has called this configurable since Phase 0; until now it was not.
-        maxIterations: cachedMaxIterations,
+        // No limit when the user switched it off - never for a scheduled run, which nobody is watching to stop.
+        maxIterations: cachedUnlimitedSteps && schedule === undefined ? Number.POSITIVE_INFINITY : cachedMaxIterations,
         /*
          * Off unless switched on: compaction loses detail, and when is the user's call. A scheduled
          * run always may, because nobody is there to press "Compact now" and a run that stops at
          * the limit overnight reports nothing useful in the morning.
          */
         autoCompact: cachedAutoCompact || schedule !== undefined,
+        // A chat at its limit hands off by itself, when that is switched on (never a scheduled run: nobody is there).
+        /*
+         * Only once the chat holds an earlier message of the user's: a chat that is full on its first message (a handoff's
+         * own opening, or one enormous paste) would hand off into a chat just as full, and again, for ever. That case
+         * gets the ordinary message saying what to do.
+         */
+        ...(cachedAutoHandoff && !cachedAutoCompact && schedule === undefined && conversation.toArray().filter((m) => m.role === 'user' && !isObserverNote(m.content)).length >= 1
+          ? {
+              onContextFull: () => {
+                handoffAtLimit = true
+                logger.info('the conversation reached the context limit: handing off to a new chat')
+              },
+            }
+          : {}),
         stallSeconds: cachedStallSeconds,
         retries: cachedRetries,
         drainQueuedMessages: () => {
@@ -6211,7 +7171,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
       // Checkpoints degrade to unavailable rather than blocking the session when git
       // isn't installed — but edits then proceed with no rollback point, so say so.
-      if (shadowGit !== undefined && (await ShadowGit.isGitAvailable())) {
+      if (shadowGit !== undefined && (await gitAvailable())) {
         turnOptions.shadowGit = shadowGit
       } else {
         logger.warn('git not found on PATH — edits will proceed without a rollback checkpoint')
@@ -6302,6 +7262,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             : undefined
         })(),
       )
+      /*
+       * Captured for `consultAgent` - from this turn's registry only. It was set by every `currentToolRegistry` call,
+       * and a dozen of them run for other reasons (a reindex, a tool lookup) with the dispatcher off: a specialist's
+       * briefing then changed between two questions in one turn, its process was replaced, and its context with it.
+       */
+      agentBriefingTools = () => fullRegistry.list()
 
       /*
        * The security boundary for an unattended run is the *registry*, not the approval gate.
@@ -6340,6 +7306,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         observerHub.event({ kind: 'turnEnd', at: Date.now(), ending, ...(error !== undefined ? { error } : {}) })
       }
       observeTurnEnd = observeEnd
+      // The decision model's pick of skill and tool, appended like #role is - mid-conversation, never in the prompt's prefix.
+      if (schedule === undefined) {
+        const suggestion = await suggestSkillsAndTools(text, turnRegistry).catch(() => '')
+        if (suggestion.length > 0) messageText = `${messageText}\n\n${suggestion}`
+      }
       observerHub.event({ kind: 'turnStart', at: Date.now(), text: messageText, mode: activeMode.name, model: profile.model })
       turnOptions.drainObserverNotes = () => {
         const notes = observerHub.takeNotes()
@@ -6579,6 +7550,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       if (juniorTurnWithoutExpert) {
         appendExpertEvent({ at: Date.now(), kind: 'juniorTurn' })
         juniorTurnWithoutExpert = false
+      }
+      // The turn ended with this process alive: nothing to resume, and the run of automatic resumes is over.
+      if (schedule === undefined) {
+        turnInFlight = false
+        crashResumes = 0
       }
       // Save in `finally`, so a cancelled or errored turn is still persisted. A turn that
       // failed halfway is exactly the one the user most wants to see again afterwards.
@@ -6923,42 +7899,32 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * and Test Connection work before the profile is saved. Secrets are read from the store
    * under the form's profile id; a not-yet-saved profile therefore tests only what it can.
    */
+  /**
+   * A profile built from an unsaved form, for Refresh Models and Test Connection. A problem comes back
+   * as text for the caller to show *on its own control*: posted as `error` it landed in the chat
+   * behind Settings and the dropdown sat on "Loading…" for ever. The model is not required here - the
+   * list is how somebody finds one - which Save still checks (`validateProviderForm` there).
+   */
   async function profileFromForm(
     input: ProfileInput,
-  ): Promise<{ profile: ProviderProfile; auth: Auth } | undefined> {
+  ): Promise<{ profile: ProviderProfile; auth: Auth } | { problem: string }> {
     /*
-     * The shape is checked rather than assumed, even though the type says it is fine.
-     *
-     * `ProfileInput` describes what the *panel* sends; what arrives is whatever was posted to
-     * `/api/message`, which on the Node host is anything that can reach the port with a session
-     * token. A payload missing a field produced `Cannot read properties of undefined (reading
-     * 'trim')` — caught and shown, so nothing broke, but it names no field and suggests no fix,
-     * which §17 says an error must do.
-     *
-     * Through `validateProviderForm`, which is what `handleSaveProfile` already uses and what the
-     * form itself uses: one owner of "is this a usable profile", so a hand-posted message and a
-     * mistyped field fail identically. Refresh Models and Test Connection had no check at all
-     * before this — only saving did.
+     * The shape is checked rather than assumed, even though the type says it is fine: on the Node host
+     * what arrives is whatever was posted to `/api/message`. Through `validateProviderForm`, the
+     * form's own check, so a hand-posted message and a mistyped field fail identically.
      */
     const fieldErrors = validateProviderForm({
-      label: input.label,
+      label: typeof input.label === 'string' && input.label.trim().length > 0 ? input.label : 'Untitled',
       wireFormat: input.wireFormat,
       baseUrl: input.baseUrl,
-      model: input.model,
+      model: typeof input.model === 'string' && input.model.trim().length > 0 ? input.model : 'unset',
     })
     if (fieldErrors.length > 0) {
-      post({
-        type: 'error',
-        message: fieldErrors.map((issue) => `${issue.path}: ${issue.message}`).join('; '),
-      })
-      return undefined
+      return { problem: fieldErrors.map((issue) => `${issue.path}: ${issue.message}`).join('; ') }
     }
 
     const baseUrl = input.baseUrl.trim()
-    if (baseUrl.length === 0) {
-      post({ type: 'error', message: 'Enter a base URL first.' })
-      return undefined
-    }
+    if (baseUrl.length === 0) return { problem: 'Enter a base URL first.' }
 
     const id = input.id ?? '__unsaved__'
     // Deliberately writes any typed secret to the store before testing: otherwise a first
@@ -6966,10 +7932,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const auth = await buildAuthFromInput(input, id)
     const profile: ProviderProfile = {
       id,
-      label: input.label.trim().length > 0 ? input.label.trim() : 'Untitled',
+      label: typeof input.label === 'string' && input.label.trim().length > 0 ? input.label.trim() : 'Untitled',
       wireFormat: input.wireFormat,
       baseUrl,
-      model: input.model.trim().length > 0 ? input.model.trim() : 'unset',
+      model: typeof input.model === 'string' && input.model.trim().length > 0 ? input.model.trim() : 'unset',
       auth,
       ...(input.connectionTls !== undefined ? { tls: stripEmpty(input.connectionTls) } : {}),
     }
@@ -7120,6 +8086,45 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * `preferStaged` is VS Code's commit: it commits what is staged when anything is, so that is what
    * is described. Fire Code adds everything first, so it describes everything.
    */
+  /**
+   * The rest of what is being typed in the chat box, from the chat's own model (`composerCompletion`). One request at a
+   * time - a newer one stops the last - cut off at the first line and after eight seconds; any failure is no suggestion,
+   * never an error in the chat.
+   */
+  async function suggestCompletion(id: string, typed: string): Promise<void> {
+    completionAbort?.abort()
+    const controller = new AbortController()
+    completionAbort = controller
+    const answer = (text: string): void => {
+      if (completionAbort === controller) completionAbort = undefined
+      post({ type: 'completion', id, text })
+    }
+    if (!cachedComposerCompletion || typed.trim().length < TYPE_AHEAD_MIN_CHARS || typed.length > 4000) return answer('')
+    const timer = setTimeout(() => controller.abort(), 8_000)
+    let reply = ''
+    try {
+      const config = await loadSettings()
+      const profile = resolveActiveProfile(config)
+      const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger, services.languageModels)
+      const messages = typeAheadMessages(redact(typed, cachedSecretValues), conversation.toArray())
+      for await (const chunk of provider.streamChat(messages, { signal: controller.signal })) {
+        if (chunk.type === 'text') reply += chunk.text
+        if (chunk.type === 'error') break
+        // One line is all that is shown; the rest is not worth waiting for.
+        if (reply.trimStart().includes('\n') || reply.length > 400) {
+          controller.abort()
+          break
+        }
+      }
+    } catch {
+      // Stopped by a newer request, the time limit or the gateway: no suggestion.
+    } finally {
+      clearTimeout(timer)
+    }
+    if (completionAbort !== controller && completionAbort !== undefined) return
+    answer(cleanSuggestion(typed, reply))
+  }
+
   async function writeCommitMessage(root: string | undefined, options: { preferStaged?: boolean } = {}): Promise<string> {
     if (root === undefined) throw new Error('No folder is open.')
     // A hub codebase's repository is on the hub; this copy has none.
@@ -9448,7 +10453,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
     await syncMcpFromConfig(config)
     await mcp.ensureConnected()
-    await python.configure({ ...(config.python ?? {}), ...pythonFolders(config) })
+    await configurePython(config)
     const registry = currentToolRegistry()
     const tool = registry.get(name) ?? registry.get(`py__${name}`)
     if (tool === undefined) {
@@ -9573,6 +10578,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           return { ok: true, data: await answerMonitorStore(request.op, await monitorStore(request.storeId, request.index), request.args) }
         case 'explain':
           return { ok: true, data: await explainForMonitor(request.context) }
+        case 'triage':
+          return { ok: true, data: await triageAlert(request.context) }
         case 'probe': {
           const here = await monitorToolHere(request.tool)
           return { ok: true, data: 'refusal' in here ? { ready: false, reason: here.refusal } : { ready: true } }
@@ -9615,6 +10622,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /** The Atlassian tab's view of all three products. Tokens never cross — only whether one is stored (invariant 7). */
   async function postAtlassian(): Promise<void> {
+    post({ type: 'atlassian', products: await atlassianStatus() })
+  }
+
+  /** Every DevOps product's settings as the panel shows them - secrets only as whether one is stored. */
+  async function atlassianStatus(): Promise<Record<AtlassianProductId, AtlassianProductStatus>> {
     const { config } = await configManager.load()
     const products = {} as Record<AtlassianProductId, AtlassianProductStatus>
     for (const info of ATLASSIAN_PRODUCTS) {
@@ -9654,7 +10666,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           : {}),
       }
     }
-    post({ type: 'atlassian', products })
+    return products
   }
 
   /**
@@ -9675,16 +10687,33 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const refuse = (message: string): void => {
       post({ type: 'atlassianTest', product, ok: false, detail: `Not saved: ${message}` })
     }
+    const problem = await saveAtlassianSettings(product, input, token, gateway)
+    if (problem !== undefined) {
+      refuse(problem)
+      return
+    }
+    post({ type: 'atlassianSaved', product })
+  }
+
+  /**
+   * Saves one DevOps product, for the panel's Save and for `devops_setup` alike, so the two cannot store a setting
+   * differently. Returns why it was refused (and, for a refused gateway, that the site settings were saved), or
+   * undefined. The panel is refreshed either way.
+   */
+  async function saveAtlassianSettings(
+    product: AtlassianProductId,
+    input: AtlassianSettingsView,
+    token: string | undefined,
+    gateway?: { settings: AutosysGatewaySettings; clientSecret?: string; passphrase?: string; basicValue?: string },
+  ): Promise<string | undefined> {
     try {
       const info = atlassianProduct(product)
       const baseUrl = input.baseUrl.trim().replace(/\/+$/, '')
       if (baseUrl.length > 0 && !/^https?:\/\/[^\s]+$/i.test(baseUrl)) {
-        refuse(`"${baseUrl}" is not a web address — it should begin with https followed by the site name.`)
-        return
+        return `"${baseUrl}" is not a web address — it should begin with https followed by the site name.`
       }
       if (input.enabled && baseUrl.length === 0) {
-        refuse(`Enter the ${info.label} site address before switching it on.`)
-        return
+        return `Enter the ${info.label} site address before switching it on.`
       }
       if (token !== undefined && token.trim().length > 0) {
         await secrets.set(info.tokenRef, token.trim())
@@ -9724,15 +10753,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         if (problem !== undefined) {
           await loadSettings()
           await postAtlassian()
-          refuse(`the API gateway settings — ${problem} The site settings were saved.`)
-          return
+          return `the API gateway settings — ${problem} The site settings were saved.`
         }
       }
       await loadSettings()
       await postAtlassian()
-      post({ type: 'atlassianSaved', product })
+      return undefined
     } catch (error) {
-      refuse(error instanceof Error ? error.message : String(error))
+      return error instanceof Error ? error.message : String(error)
     }
   }
 
@@ -9853,6 +10881,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * the sentence is our reading, the record is what it was read from.
    */
   async function handleTestAtlassian(product: AtlassianProductId): Promise<void> {
+    post({ type: 'atlassianTest', product, ...(await testAtlassian(product)) })
+  }
+
+  /** Test connection's answer, for the panel and for `devops_setup`: who signed in, or why not, with the record. */
+  async function testAtlassian(product: AtlassianProductId): Promise<{ ok: boolean; detail: string; diagnostics: string }> {
     const entries: TraceEntry[] = []
     const { config } = await configManager.load()
     // Whatever this product could send, blanked wherever it appears in the record.
@@ -9874,15 +10907,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               : product === 'autosys'
                 ? await testAutosys(http, config)
                 : await (await bitbucketClient(http)).currentUser()
-      post({ type: 'atlassianTest', product, ok: true, detail: `Connected as ${who}.`, diagnostics: renderTrace(entries) })
+      return { ok: true, detail: `Connected as ${who}.`, diagnostics: renderTrace(entries) }
     } catch (error) {
-      post({
-        type: 'atlassianTest',
-        product,
-        ok: false,
-        detail: error instanceof Error ? error.message : String(error),
-        diagnostics: renderTrace(entries),
-      })
+      return { ok: false, detail: error instanceof Error ? error.message : String(error), diagnostics: renderTrace(entries) }
     }
   }
 
@@ -12933,7 +13960,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function configurePythonFromSettings(): Promise<void> {
     if (userTurnRunning || runningScheduleId !== undefined) return
     const config = await loadSettings()
-    await python.configure({ ...(config.python ?? {}), ...pythonFolders(config) })
+    await configurePython(config)
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -13773,7 +14800,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const { config } = await configManager.load()
       // Applied immediately rather than at the next turn: switching it on should show the
       // environment coming up, not sit silent until the user happens to send a message.
-      await python.configure({ ...(config.python ?? {}), ...pythonFolders(config) })
+      await configurePython(config)
       await postPython()
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
@@ -14119,6 +15146,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /** Builds a client from unsaved form state, so Test and index listing work before saving. */
   async function clientFromInput(input: SearchConnectionInput): Promise<OpenSearchClient> {
+    const { store, id } = await storeFromInput(input)
+    return openSearchClientFor(store, id)
+  }
+
+  /** The connection as typed, credentials stored under its id so the resolver finds them. */
+  async function storeFromInput(input: SearchConnectionInput): Promise<{ store: VectorStoreConfig; id: string }> {
     const id = input.id ?? '__unsaved__'
     if (input.username !== undefined && input.username.length > 0)
       await secrets.set(searchUserRefFor(id), input.username)
@@ -14126,7 +15159,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       await secrets.set(searchPasswordRefFor(id), input.password)
 
     const store: VectorStoreConfig = {
-      kind: 'opensearch',
+      kind: input.kind ?? 'opensearch',
       label: input.label.length > 0 ? input.label : 'Untitled',
       url: input.url,
       ...((await secrets.get(searchUserRefFor(id))) !== undefined
@@ -14140,7 +15173,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ? { rejectUnauthorized: input.rejectUnauthorized }
         : {}),
     }
-    return openSearchClientFor(store, id)
+    return { store, id }
   }
 
   async function handleSaveSearchConnection(input: SearchConnectionInput): Promise<void> {
@@ -14218,12 +15251,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   async function handleTestSearchConnection(input: SearchConnectionInput): Promise<void> {
     try {
-      const info = await (await clientFromInput(input)).ping()
-      post({
-        type: 'searchTestResult',
-        ok: true,
-        detail: `Connected to ${info.clusterName ?? 'the cluster'}${info.version !== undefined ? ` (OpenSearch ${info.version})` : ''}.`,
-      })
+      // Spoken in the connection's own type: testing everything as OpenSearch let a Qdrant-typed
+      // connection to an OpenSearch address pass here and fail at indexing (`rag/serverKind.ts`).
+      const { store, id } = await storeFromInput(input)
+      const detail = await probeVectorStore(httpClient, store.kind, await vectorStoreConnectionFor(store, id))
+      post({ type: 'searchTestResult', ok: true, detail })
     } catch (error) {
       post({
         type: 'searchTestResult',
@@ -14301,7 +15333,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function handleRequestModels(input: ProfileInput): Promise<void> {
     try {
       const built = await profileFromForm(input)
-      if (built === undefined) return
+      if ('problem' in built) {
+        post({ type: 'models', models: [], warning: built.problem })
+        return
+      }
 
       const { config } = await configManager.load()
       const result = await listModelsFor(config, built.profile)
@@ -14324,7 +15359,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function handleTestConnection(input: ProfileInput): Promise<void> {
     try {
       const built = await profileFromForm(input)
-      if (built === undefined) return
+      if ('problem' in built) {
+        post({ type: 'testConnectionResult', ok: false, steps: [{ step: 'certificates', status: 'failed', detail: built.problem }] })
+        return
+      }
 
       const { config } = await configManager.load()
       const result =
@@ -14710,14 +15748,39 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     request: { question: string; files?: string[] | undefined; signal?: AbortSignal | undefined; parallel?: boolean | undefined },
   ): Promise<{ advice: string; label: string }> {
     const strategy = activeStrategy
-    if (strategy === undefined) return consultAgentNow(agent, request, false)
+    if (strategy === undefined) {
+      // Asked alongside the consultation, so it costs no waiting: advice for the main agent, never a change of who answers.
+      const suggestion = suggestRole(agent, request.question)
+      const answer = await consultAgentNow(agent, request, false)
+      const note = await suggestion
+      return note === undefined ? answer : { ...answer, advice: `${answer.advice}\n\n${note}` }
+    }
     const name = (role: string): string => roleInfo(role, cachedAgentDefinitions).name
     const planned = beforeConsult(strategy, strategyProgress, strategyLastRole, agent.role, name)
     if (planned.refuse !== undefined) {
       recordExchange({ at: Date.now(), role: agent.role, question: request.question.slice(0, 4_000), answer: '', refused: planned.refuse })
       throw new Error(planned.refuse)
     }
-    const question = planned.addToPrompt.length > 0 ? `${request.question}\n\n${planned.addToPrompt}` : request.question
+    /*
+     * `@` references in a step's instructions are resolved here, exactly as in a typed message: the user named the
+     * files, so there is nothing to approve, and confinement and the deny list apply as they do to `@` in the chat.
+     */
+    let stepNotes = planned.addToPrompt
+    if (stepNotes.includes('@') && workspaceRoot !== undefined) {
+      const mentioned = await resolveMentions(stepNotes, { fs: new NodeFileSystem(), workspaceRoot, denylist, siblings: mentionCodebases() }).catch(() => [])
+      if (mentioned.length > 0) stepNotes = attachMentions(stepNotes, mentioned)
+    }
+    /*
+     * Hand-overs go from specialist to specialist, not through the main agent (asked for: "agents should have their own
+     * context, when following the strategy, main chat context should not fill up"). The latest full answer of every step
+     * connected into this one is attached here, and the specialist is asked for a short summary, which is all the main
+     * agent is given back (`answerForMain`).
+     */
+    const handed = handOverSources(strategy, agent.role)
+      .map((role) => ({ role, answer: latestStrategyAnswer(role) }))
+      .filter((entry): entry is { role: string; answer: string } => entry.answer !== undefined)
+      .map((entry) => `## Handed over from ${name(entry.role)} (its latest answer, passed on directly)\n\n${entry.answer.length > HANDOVER_LIMIT ? `${entry.answer.slice(0, HANDOVER_LIMIT)}… [cut at ${String(HANDOVER_LIMIT)} characters]` : entry.answer}`)
+    const question = [request.question, ...handed, ...(stepNotes.length > 0 ? [stepNotes] : []), SUMMARY_REQUEST].join('\n\n')
     // Shown as running in the Strategy window and on its button while it works.
     strategyRunning.add(agent.role)
     strategyLastRole = agent.role
@@ -14744,12 +15807,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       strategyRunning.delete(agent.role)
     }
     const before = strategyProgress
-    const recorded = afterConsult(strategy, strategyProgress, agent.role, answer.advice, name)
+    const recorded = afterConsult(strategy, strategyProgress, agent.role, answer.advice, name, await judgeLoops(strategy, agent.role, answer.advice, name))
     strategyProgress = recorded.progress
     // What the main agent asked, not the strategy's notes to the specialist: those are the specialist's instructions,
     // and through `strategy_history` they would reach the main agent's context.
     const exchange = exchangeOf(agent.role, request.question, answer.advice, before, recorded.progress, request.parallel === true)
     recordExchange(checks.length > 0 ? { ...exchange, contracts: checks.map((check) => ({ ...check, askedAgain: askedAgain.get(check.edgeId) ?? 0 })) } : exchange)
+    strategyAnswers.set(agent.role, answer.advice)
     strategyLastRole = agent.role
     persistSoon()
     void postStrategies()
@@ -14761,8 +15825,140 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ? `[Strategy] The hand-over to ${name(check.to)} is incomplete even after asking again: missing ${check.missing.join(', ')}. Pass on what arrived and say plainly what is missing.`
           : `[Strategy] The hand-over to ${name(check.to)} is complete (${check.required.join(', ')}), after asking ${name(agent.role)} again for what it had left out.`,
       )
-    const notes = [...contractNotes, ...(recorded.note !== undefined ? [recorded.note] : [])]
-    return notes.length > 0 ? { ...answer, advice: `${answer.advice}\n\n${notes.join('\n')}` } : answer
+    const decisionNotes = [...(await scoreHandOvers(strategy, agent, request, answer, planned.readOnly, name)), ...(await chooseBranch(strategy, agent.role, answer.advice, name))]
+    const notes = [...contractNotes, ...(recorded.note !== undefined ? [recorded.note] : []), ...decisionNotes]
+    // The main agent gets the summary; the whole answer went into the record and on to the next step.
+    const forMain = answerForMain(answer.advice, name(agent.role))
+    return { ...answer, advice: notes.length > 0 ? `${forMain}\n\n${notes.join('\n')}` : forMain }
+  }
+
+  /**
+   * Hand-over scores (decision model): for each connector out of this step with a contract, how completely the answer
+   * gives what was agreed. Below `DEFAULT_HANDOVER_THRESHOLD` the specialist is asked once more for it, and the main
+   * agent is told. Nothing without a decision model; a score it is not given changes nothing.
+   */
+  async function scoreHandOvers(
+    strategy: Strategy,
+    agent: ResolvedAgent,
+    request: { question: string; files?: string[] | undefined; signal?: AbortSignal | undefined; parallel?: boolean | undefined },
+    answer: { advice: string; label: string },
+    readOnly: boolean,
+    name: (role: string) => string,
+  ): Promise<string[]> {
+    if (cachedDecision?.profileId === undefined || cachedDecision.scoreHandOvers === false) return []
+    const notes: string[] = []
+    for (const edge of strategy.edges) {
+      const from = strategy.nodes.find((node) => node.id === edge.from)
+      if (from?.role !== agent.role || edge.contract === undefined || edge.contract.trim().length === 0) continue
+      const to = strategy.nodes.find((node) => node.id === edge.to)
+      const target = to !== undefined ? name(to.role) : 'the next step'
+      const decision = await askDecisionModel(`Hand-over ${name(agent.role)} → ${target}`, handoverQuestion(edge.contract, answer.advice), (d) =>
+        d.score === undefined ? 'no score' : d.score < DEFAULT_HANDOVER_THRESHOLD ? `incomplete (${d.score.toFixed(2)})` : `complete (${d.score.toFixed(2)})`,
+      )
+      if (decision?.score === undefined || decision.score >= DEFAULT_HANDOVER_THRESHOLD) continue
+      const more = await consultAgentNow(
+        agent,
+        { ...request, question: `Your answer does not seem to give what was agreed for the hand-over to ${target}: ${edge.contract.trim()}. Give that now, briefly.\n\nYour answer was:\n${answer.advice.slice(0, 12_000)}` },
+        readOnly,
+      ).catch(() => undefined)
+      if (more !== undefined) {
+        answer.advice = `${answer.advice}\n\n${more.advice}`
+        strategyAnswers.set(agent.role, answer.advice)
+      }
+      notes.push(`[Strategy] The decision model scored the hand-over to ${target} at ${decision.score.toFixed(2)} against what was agreed ("${edge.contract.trim()}"), so ${name(agent.role)} was asked once more for it.`)
+    }
+    return notes
+  }
+
+  /**
+   * Monitoring triage (Fire Code): before an alert is announced, the probability that it needs a person now, from its
+   * headline and alerted rows. Null without a decision model or without an answer - Fire Code then notifies as set.
+   */
+  async function triageAlert(context: Record<string, unknown>): Promise<{ needsHuman: number } | null> {
+    if (cachedDecision?.profileId === undefined || cachedDecision.triageAlerts === false) return null
+    const decision = await askDecisionModel('Monitoring triage', triageQuestion(context), (d) => `needs a person now: ${(d.probabilities?.['yes'] ?? 0).toFixed(2)}`)
+    const yes = decision?.probabilities?.['yes']
+    return decision?.ok === true && yes !== undefined ? { needsHuman: yes } : null
+  }
+
+  /**
+   * Which skill and which tool this request needs, from the decision model - asked for: "right skill to choose and right
+   * tool to choose, can we make the decision model to choose that too?". Two choice questions at once (skills that are not
+   * always in the prompt; the turn's tools, hidden ones included, but not the loop's own control tools). Advice only:
+   * appended to the request, so the tool block and the prompt's prefix never change (section 12), and every call is
+   * still approved as always. Empty without a decision model, with it switched off, or when nothing stands out.
+   */
+  const SUGGEST_TIMEOUT_MS = 4_000
+  async function suggestSkillsAndTools(text: string, registry: ToolRegistry): Promise<string> {
+    const picks = chatPicks
+    if (cachedDecision?.profileId === undefined || picks === undefined || text.trim().length < 6) return ''
+    const asked = withRecentChat(text, conversation.toArray())
+    const usable = skills.filter((skill) => skill.always !== true)
+    const control = new Set(['attempt_completion', 'ask_followup_question', 'call_tool', 'search_docs', 'forget_docs', 'read_tool_result', 'ask_user_form', 'light_code_help', 'update_plan', 'plan_progress'])
+    const tools = registry.list().filter((tool) => !control.has(tool.name))
+    const [skillDecision, toolDecision] = await Promise.all([
+      // At most four seconds before the reply starts: a suggestion that comes later is not worth the wait.
+      picks !== 'tools' && usable.length > 0 ? askDecisionModel('Skill for this request', skillQuestion(asked, usable), (d) => `best ${d.best?.id ?? '?'} ${(d.best?.probability ?? 0).toFixed(2)}`, undefined, SUGGEST_TIMEOUT_MS) : Promise.resolve(undefined),
+      picks !== 'skills' && tools.length > 0 ? askDecisionModel('Tool for this request', toolQuestion(asked, tools), (d) => `best ${d.best?.id ?? '?'} ${(d.best?.probability ?? 0).toFixed(2)}`, undefined, SUGGEST_TIMEOUT_MS) : Promise.resolve(undefined),
+    ])
+    const threshold = cachedDecision.suggestThreshold
+    const skillPicks = picked(skillDecision, threshold).map((pick) => ({ ...pick, filePath: usable.find((skill) => skill.name === pick.id)?.filePath }))
+    const toolPicks = picked(toolDecision, threshold).map((pick) => ({ ...pick, hidden: registry.isDispatchOnly(pick.id) }))
+    return describeSuggestions(skillPicks, toolPicks)
+  }
+
+  /** The decision step (`decides` on a step): which connector to follow next, told to the main agent. */
+  async function chooseBranch(strategy: Strategy, role: string, answer: string, name: (role: string) => string): Promise<string[]> {
+    if (cachedDecision?.profileId === undefined) return []
+    const choice = branchChoice(strategy, role, name)
+    if (choice === undefined) return []
+    const threshold = cachedDecision.routeThreshold ?? DEFAULT_ROUTE_THRESHOLD
+    const decision = await askDecisionModel(
+      `Decision step after ${name(role)}`,
+      { kind: 'choice', question: choice.question, options: choice.options, inputs: { text: `${name(role)} answered:\n${answer.slice(0, 16_000)}` } },
+      (d) => (d.best !== undefined && d.best.probability >= threshold ? `go to ${choice.options.find((o) => o.id === d.best?.id)?.label ?? '?'}` : 'left to the main agent'),
+    )
+    const best = decision?.best
+    const picked = best !== undefined && best.probability >= threshold ? choice.options.find((option) => option.id === best.id) : undefined
+    if (picked === undefined || best === undefined) {
+      return [`[Strategy] Decision step after ${name(role)}: the decision model was not sure which way to go${decision?.ok === false ? ' (it did not answer)' : ''} - choose from the connectors yourself.`]
+    }
+    return [`[Strategy] Decision step after ${name(role)}: the decision model picks ${picked.label}${picked.description !== undefined ? ` (${picked.description})` : ''}, probability ${best.probability.toFixed(2)}. Go there next.`]
+  }
+
+  /**
+   * Agent team, during a turn, no strategy: when the main agent consults one specialist, whether the decision model
+   * thinks another fits the question better. Advice in the result only - the consultation goes ahead as asked.
+   */
+  async function suggestRole(agent: ResolvedAgent, question: string): Promise<string | undefined> {
+    if (cachedDecision?.profileId === undefined || cachedDecision.suggestRoles === false || turnModeId !== 'agent-team') return undefined
+    const team = cachedTeam.filter((candidate) => candidate.available)
+    if (team.length < 2) return undefined
+    const threshold = cachedDecision.routeThreshold ?? DEFAULT_ROUTE_THRESHOLD
+    const decision = await askDecisionModel('Role suggestion during a turn', routeQuestion(question, team, []), (d) => `best ${d.best?.id ?? '?'} ${(d.best?.probability ?? 0).toFixed(2)}`).catch(() => undefined)
+    if (decision === undefined) return undefined
+    return roleSuggestion(decision, agent.role, threshold, (role) => team.find((candidate) => candidate.role === role)?.name ?? role)
+  }
+
+  /**
+   * The full answers of this topic's consultations, by role, for hand-overs. Kept whole in memory (the exchange log keeps
+   * 4,000 characters each); after a restart the log's copy stands in.
+   */
+  const strategyAnswers = new Map<string, string>()
+  /** When this topic's run of the strategy began: an earlier topic's answers are never handed over. */
+  let strategyTopicSince = 0
+  const HANDOVER_LIMIT = 24_000
+  function resetHandOvers(since = Date.now()): void {
+    strategyAnswers.clear()
+    strategyTopicSince = since
+  }
+  function latestStrategyAnswer(role: string): string | undefined {
+    const kept = strategyAnswers.get(role)
+    if (kept !== undefined) return kept
+    const logged = [...strategyExchanges]
+      .reverse()
+      .find((exchange) => exchange.role === role && exchange.at >= strategyTopicSince && exchange.refused === undefined && exchange.answer.length > 0)
+    return logged?.answer
   }
 
   function recordExchange(exchange: StrategyExchange): void {
@@ -14967,7 +16163,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * host without the helper.
      */
     const exe = services.fastFs
-    if (exe !== undefined && seatProfile.wireFormat !== 'vscode-lm' && (await fastFsAnswered)?.has('agent') === true) {
+    /*
+     * Not for Gemini: from Gemini 3 on a tool call's thought signature must come back with it, and the Rust
+     * process does not carry it - the in-process consultation does (`providers/geminiCompat.ts`).
+     */
+    const gemini = isGeminiModel(seatProfile.model, seatProfile.baseUrl)
+    if (exe !== undefined && seatProfile.wireFormat !== 'vscode-lm' && !gemini && (await fastFsAnswered)?.has('agent') === true) {
       const system = buildAgentPrompt({
         prompt: agent.prompt,
         question: '',
@@ -15635,35 +16836,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         logger.warn('Ignoring sendMessage: a turn is already in progress.')
         return
       }
-      void (async () => {
-        /*
-         * Wait rather than refuse. A scheduled run holds the conversation for a few seconds;
-         * rejecting the user's message for that window would look like the composer had
-         * swallowed it, and interleaving the two would corrupt both transcripts.
-         */
-        if (scheduledRunInFlight !== undefined) {
-          logger.info('holding the message until the scheduled run finishes')
-          await scheduledRunInFlight
-        }
-        userTurnRunning = true
-        userTurnWindingDown = false
-        // Composed before anything else: the reply quote and any reactions are part of what
-        // the user said, so mentions and #roles are read from the same text the model sees.
-        const turn = handleSendMessage(
-          composeUserText(message.text, { replyTo: boundedQuote(message.replyTo), reactions: takeReactions() }),
-          message.images,
-        )
-        userTurnSettled = turn.then(
-          () => undefined,
-          () => undefined,
-        )
-        try {
-          await turn
-        } finally {
-          userTurnRunning = false
-          userTurnWindingDown = false
-        }
-      })()
+      // Composed before anything else: the reply quote and any reactions are part of what
+      // the user said, so mentions and #roles are read from the same text the model sees.
+      startUserTurn(() => composeUserText(message.text, { replyTo: boundedQuote(message.replyTo), reactions: takeReactions() }), message.images)
     } else if (message.type === 'saveComposerDraft') {
       void saveComposerDraft(message.text)
     } else if (message.type === 'requestComposerDraft') {
@@ -15745,7 +16920,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'deleteTask') {
       reportFailure('deleteTask', deleteTask(message.id))
     } else if (message.type === 'newTask') {
-      reportFailure('startNewTask', startNewTask())
+      /*
+       * A new chat keeps the strategy of the chat it was started from (asked for: "clicking + didnt carry the selected
+       * strategy in previous session"), its loops and hand-overs starting afresh; "Stop using" takes it off.
+       */
+      // Taken in the same step that clears the chat, never applied afterwards: a chat opened from History in between
+      // would otherwise have its own strategy progress overwritten by the late second step.
+      reportFailure('startNewTask', startNewTask({ keepStrategy: activeStrategy, keepPicks: chatPicks }))
     } else if (message.type === 'startHandoff') {
       reportFailure('handleHandoff', handleHandoff())
     } else if (message.type === 'cancelHandoff') {
@@ -15760,6 +16941,103 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'setAutoCompact') {
       void configManager
         .save('user', { autoCompact: message.value })
+        .then(() => postSettings())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'setComposerCompletion') {
+      void configManager
+        .save('user', { composerCompletion: message.value })
+        .then(() => postSettings())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'requestWebChat') {
+      reportFailure('postWebChat', postWebChat())
+    } else if (message.type === 'startWebChatCapture') {
+      void startWebChatCapture(message.pageUrl.trim(), message.server).catch((error: unknown) =>
+        post({ type: 'webChatCapture', phase: 'failed', message: error instanceof Error ? error.message : String(error) }),
+      )
+    } else if (message.type === 'sendWebChatPhrase') {
+      const capture = webChatCapture
+      const server = capture?.server
+      if (capture !== undefined && server !== undefined) {
+        void runScript(chromeAccess(server), typePhraseScript(new URL(capture.pageUrl).origin, capture.phrase), capture.pageId)
+          .then((done) => {
+            if (done['ok'] !== true) post({ type: 'webChatCapture', phase: 'waiting', phrase: capture.phrase, message: String(done['error'] ?? 'It could not be typed - paste it by hand.') })
+          })
+          .catch((error: unknown) => post({ type: 'webChatCapture', phase: 'waiting', phrase: capture.phrase, message: error instanceof Error ? error.message : String(error) }))
+      }
+    } else if (message.type === 'confirmWebChatCapture') {
+      // Saved only now, approved by the user: the one backend address consultations will use.
+      const chosen = webChatCapture?.candidates[message.index]
+      const chosenServer = webChatCapture?.server
+      stopWebChatCapture()
+      if (chosen === undefined || webChatFile === undefined) {
+        void postWebChat('Nothing to save: capture again.')
+      } else {
+        void writeWebChatSetup(webChatFile, { ...chosen.setup, server: chosenServer })
+          .then(() => postWebChat(`Saved. Consultations go to ${chosen.backend} only.`))
+          .catch((error: unknown) => postWebChat(`Could not save: ${error instanceof Error ? error.message : String(error)}`))
+      }
+    } else if (message.type === 'cancelWebChatCapture') {
+      stopWebChatCapture()
+      void postWebChat()
+    } else if (message.type === 'setWebChatServer') {
+      void (async () => {
+        const setup = await loadWebChat()
+        if (setup === undefined || webChatFile === undefined) return
+        await writeWebChatSetup(webChatFile, { ...setup, server: message.server })
+        await postWebChat(`The web chat now uses "${message.server}". Any other Chrome server is left as it was.`)
+      })()
+    } else if (message.type === 'setWebChatModel') {
+      void (async () => {
+        const setup = await loadWebChat()
+        if (setup === undefined || webChatFile === undefined) return
+        const model = message.model?.trim()
+        const next: WebChatSetup = { ...setup }
+        if (model === undefined || model.length === 0) delete next.modelOverride
+        else next.modelOverride = model
+        await writeWebChatSetup(webChatFile, next)
+        await postWebChat('Saved.')
+      })()
+    } else if (message.type === 'clearWebChat') {
+      stopWebChatCapture()
+      if (webChatFile !== undefined) void writeWebChatSetup(webChatFile, undefined).then(() => postWebChat('Removed.'))
+    } else if (message.type === 'requestDecisionModel') {
+      reportFailure('postDecisionModel', postDecisionModel())
+    } else if (message.type === 'saveDecisionModel') {
+      const settings = message.settings
+      const endpointProblem = decisionEndpointProblem(settings.endpoint?.trim())
+      if (endpointProblem !== undefined) {
+        void postDecisionModel(endpointProblem)
+        return
+      }
+      void configManager
+        .save('user', { decisionModel: settings.profileId === undefined ? undefined : settings })
+        .then(async () => {
+          await postSettings()
+          await postDecisionModel()
+        })
+        .catch((error: unknown) => void postDecisionModel(error instanceof Error ? error.message : String(error)))
+    } else if (message.type === 'setChatSkillToolPicks') {
+      chatPicks = isSkillToolPicks(message.value) ? message.value : undefined
+      post({ type: 'chatSkillToolPicks', value: chatPicks ?? 'off' })
+      void postStrategies()
+      persistSoon()
+      void persistActiveTask()
+    } else if (message.type === 'requestChatSkillToolPicks') {
+      post({ type: 'chatSkillToolPicks', value: chatPicks ?? 'off' })
+    } else if (message.type === 'testDecisionModel') {
+      reportFailure('testDecisionModel', testDecisionModel())
+    } else if (message.type === 'requestCompletion') {
+      void suggestCompletion(message.id, message.text)
+    } else if (message.type === 'setUnlimitedSteps') {
+      void configManager
+        .save('user', { unlimitedSteps: message.value })
+        .then(() => postSettings())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'requestStartupProgress') {
+      postStartupProgress(true)
+    } else if (message.type === 'setAutoHandoff') {
+      void configManager
+        .save('user', { autoHandoff: message.value })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setMaxIterations') {
@@ -15945,6 +17223,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         'useStrategy',
         (async () => {
           const config = (await configManager.load()).config
+          // A whole strategy, carried from the chat a new one was opened from, is checked like any saved one.
+          const carried = message.strategy === undefined ? undefined : strategySchema.safeParse(message.strategy)
+          if (carried !== undefined) {
+            if (carried.success) await useStrategy(carried.data)
+            return
+          }
           await useStrategy(message.id === undefined ? undefined : (config.strategies ?? []).find((each) => each.id === message.id))
         })(),
       )
@@ -16290,6 +17574,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
         .then(() => postSkills())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'requestArtifacts') {
+      reportFailure('requestArtifacts', handleRequestArtifacts())
+    } else if (message.type === 'describeArtifact') {
+      reportFailure('describeArtifact', handleDescribeArtifact(message.path))
+    } else if (message.type === 'openArtifact') {
+      reportFailure('openArtifact', handleOpenArtifact(message.path, message.how))
     } else if (message.type === 'openManagedFile') {
       reportFailure('handleOpenManagedFile', handleOpenManagedFile(message.path))
     } else if (message.type === 'saveEditorFile') {
@@ -16556,17 +17846,78 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   // runs when the user opens Light Code — not at VS Code startup. Doing it here means
   // tools are ready before the first message and health is visible immediately, rather
   // than a mistyped command sitting undetected until something happens to use it.
-  // Deliberately not awaited: a slow server must not delay the panel rendering.
-  void (async () => {
+  // Deliberately not awaited: a slow server must not delay the panel rendering. Kept as a promise so a turn
+  // resumed after a crash (`agent/resume.ts`) can wait for the tools the task was using.
+  const mcpStarted = (async () => {
     try {
       const { config } = await configManager.load()
       await syncMcpFromConfig(config)
-      await mcp.ensureConnected()
+      /*
+       * Ready means "its tools can be offered", not "every server has answered": a server whose tools are
+       * remembered from an earlier session of this codebase keeps starting in the background. A turn
+       * resumed after a crash waits on this, and waited for the slowest server before (reported: minutes).
+       */
+      await mcp.ensureReady()
       mcpStartProblem = undefined
     } catch (error) {
       logger.warn(`Could not start MCP servers: ${describeFailure(error, true)}`)
       mcpStartProblem = `Starting MCP servers and add-ons failed when Light Code opened: ${describeFailure(error)}`
       await postAddons().catch(() => undefined)
+    }
+  })()
+
+  /*
+   * Everything the first message would otherwise wait for, done while the person is still typing it
+   * (reported: in Fire Code the first reply of a chat took very long and the rest were quick). Each
+   * part is what a turn does anyway and is cached or single-flight there, so a message sent before
+   * this finishes waits for the part still running rather than starting it again:
+   * - Python's uv check, environment and worker, which load every approved tool - seconds;
+   * - skills, from every folder including bucket and team copies;
+   * - the gateway: the model list (also the reported context window) and the sign-in token, which
+   *   opens the connection the first request then reuses instead of a fresh TLS handshake;
+   * - whether git runs, and the expert command line when one is configured.
+   * Nothing here contacts anything a turn would not; with no provider configured it stops there.
+   */
+  void (async () => {
+    try {
+      const config = await loadSettings()
+      /*
+       * Each part is timed and named in the log when slow. "A chat takes minutes to start after a crash or a
+       * sleep" was reported with nothing to say which part; the next report will.
+       */
+      const startedAt = Date.now()
+      // Shown in the bar over the message box while it runs; MCP servers are listed there one by one instead.
+      const timed = (label: string, work: Promise<unknown>, shown = true): Promise<unknown> =>
+        (shown ? trackStartup(label, work) : work).finally(() => {
+          const seconds = (Date.now() - startedAt) / 1000
+          if (seconds >= 2) logger.info(`[startup] ${label} ready after ${seconds.toFixed(1)}s`)
+        })
+      const parts: Promise<unknown>[] = [
+        timed('Stored credentials', knownSecretValues()),
+        timed('Skills', refreshSkills()),
+        timed('Python tools', configurePython(config)),
+        timed('Git', gitAvailable()),
+        timed('Expert', resolveExpert(config)),
+        timed('MCP servers', mcpStarted, false),
+      ]
+      if ((config.profiles ?? []).length > 0) {
+        const profile = resolveActiveProfile(config)
+        parts.push(
+          timed(
+            'Model gateway sign-in',
+            (async () => {
+              if (profile.wireFormat !== 'vscode-lm') await authStrategyFor(config, profile).resolveHeaders()
+              await reportedWindowFor(config, profile)
+            })(),
+          ),
+        )
+      }
+      const results = await Promise.allSettled(parts)
+      for (const result of results) {
+        if (result.status === 'rejected') logger.info(`Preparing the session: ${describeFailure(result.reason, true)}`)
+      }
+    } catch (error) {
+      logger.info(`Preparing the session was skipped: ${describeFailure(error, true)}`)
     }
   })()
 
@@ -16577,6 +17928,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     try {
       await restoreActiveTaskOnLoad()
       await postTasks()
+      await resumeInterruptedTurn()
     } catch (error) {
       logger.warn(
         `Could not restore the previous task: ${error instanceof Error ? error.message : String(error)}`,
@@ -17540,6 +18892,7 @@ ${contents}
       if (hubSyncTimer !== undefined) clearInterval(hubSyncTimer)
       if (hubSyncStartup !== undefined) clearTimeout(hubSyncStartup)
       void hub?.kernel.dispose()
+      for (const other of otherHubs) void other.kernel.dispose()
       // Nothing may outlive the bridge, least of all something that spends money.
       stopKeepAlive()
       // The observer processes call a model too; the journal's last records are written first.

@@ -22,6 +22,8 @@ export const USER_SCOPE_ONLY_KEYS = [
   'observers',
   // Saved strategies steer which specialists act, read-only or not: the user's, never a repository's.
   'strategies',
+  // Which model routes messages to specialists and judges strategy loops: the user's, never a repository's.
+  'decisionModel',
   // Reads the user's mail and their open workbooks. A repository must never switch it on.
   'office',
   // Names language-server programs to run when a file is edited.

@@ -1848,6 +1848,17 @@ pub fn alert_patterns(records: &[CheckRecord], key: Option<&str>, alert: Option<
 }
 
 
+/// Monitoring triage by the decision model (Settings → Agents in Light Code): how sure it is that an alert needs a
+/// person now moves how it is announced - at 0.8 or more at least `Urgent` (stays on screen); at 0.2 or less at most
+/// `Silent`, but never for red, which is always announced as set. Anything else, or no answer: as set.
+pub fn triaged_mode(mode: Mode, level: Level, needs_human: Option<f64>) -> Mode {
+    match needs_human {
+        Some(p) if p >= 0.8 && mode < Mode::Urgent && mode >= Mode::Silent => Mode::Urgent,
+        Some(p) if p <= 0.2 && level != Level::Red && mode > Mode::Silent => Mode::Silent,
+        _ => mode,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Telling {
     Worse,
@@ -2480,6 +2491,12 @@ mod tests {
         let s = Settings::default();
         let day = LocalNow { weekday: 1, minutes: 600, offset_secs: 0 };
         let fresh = MonitorState::default();
+        assert_eq!(triaged_mode(Mode::Toast, Level::Amber, Some(0.9)), Mode::Urgent);
+        assert_eq!(triaged_mode(Mode::Toast, Level::Amber, Some(0.1)), Mode::Silent);
+        assert_eq!(triaged_mode(Mode::Alarm, Level::Red, Some(0.05)), Mode::Alarm, "red is announced as set");
+        assert_eq!(triaged_mode(Mode::Toast, Level::Amber, Some(0.5)), Mode::Toast);
+        assert_eq!(triaged_mode(Mode::Toast, Level::Amber, None), Mode::Toast);
+        assert_eq!(triaged_mode(Mode::Dashboard, Level::Amber, Some(0.95)), Mode::Dashboard, "a level set not to notify stays so");
         assert_eq!(should_notify(&m, Level::Red, &fresh, &s, 1000, day), Some((Mode::Urgent, Telling::Worse)));
         assert_eq!(should_notify(&m, Level::Amber, &fresh, &s, 1000, day), Some((Mode::Toast, Telling::Worse)));
         // Below the monitor's notify level (amber by default): only counted on the tile.

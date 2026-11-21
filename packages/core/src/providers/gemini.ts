@@ -3,7 +3,7 @@ import { applyThinking } from './thinking.js'
 import type { Logger } from '../logging/logger.js'
 import type { HttpClient, HttpRequestOptions, HttpResponse } from '../platform/http.js'
 import { describeTlsError } from './auth/apigeeMtls.js'
-import { toGeminiTools } from './schema.js'
+import { requiresSignature, restoreArguments, SKIP_SIGNATURE, toGeminiCompatTools, type Reshaped } from './geminiCompat.js'
 import type {
   AuthStrategy,
   ChatMessage,
@@ -41,13 +41,20 @@ export class GeminiProvider implements ChatProvider {
     const url = `${base}/models/${encodeURIComponent(this.profile.model)}:streamGenerateContent?alt=sse`
     this.logger?.debug('POST', url)
 
-    const { systemInstruction, contents } = toGeminiContents(messages)
+    const { systemInstruction, contents } = toGeminiContents(messages, requiresSignature(this.profile.model))
     const body: Record<string, unknown> = { contents }
     if (systemInstruction !== undefined) {
       body.systemInstruction = { parts: [{ text: systemInstruction }] }
     }
+    /*
+     * The same conversion as Gemini over the OpenAI-compatible endpoint (`geminiCompat.ts`): constraints kept
+     * in the descriptions, and free-form objects offered as JSON text and turned back when the call arrives.
+     */
+    let reshaped: Map<string, Reshaped[]> | undefined
     if (options.tools !== undefined && options.tools.length > 0) {
-      body.tools = toGeminiTools(options.tools)
+      const converted = toGeminiCompatTools(options.tools)
+      reshaped = converted.reshaped
+      body.tools = [{ functionDeclarations: converted.tools.map((tool) => (tool as { function: Record<string, unknown> }).function) }]
     }
     if (this.profile.maxTokens !== undefined) {
       body.generationConfig = { maxOutputTokens: this.profile.maxTokens }
@@ -99,7 +106,7 @@ export class GeminiProvider implements ChatProvider {
       return
     }
 
-    yield* parseGeminiStream(response.body, url, options.signal)
+    yield* parseGeminiStream(response.body, url, options.signal, reshaped)
   }
 
   private async send(url: string, body: Record<string, unknown>, signal: AbortSignal | undefined): Promise<HttpResponse> {
@@ -134,7 +141,11 @@ function buildIdToName(messages: readonly ChatMessage[]): Map<string, string> {
   return map
 }
 
-export function toGeminiContents(messages: readonly ChatMessage[]): GeminiPayload {
+/**
+ * `fillSignatures`: a call with no thought signature gets the skip placeholder, which Gemini 3 and later
+ * require (`geminiCompat.ts`). A call that has one always sends it back.
+ */
+export function toGeminiContents(messages: readonly ChatMessage[], fillSignatures = false): GeminiPayload {
   const systemInstruction = messages.find((message) => message.role === 'system')?.content
   const idToName = buildIdToName(messages)
   const contents: Record<string, unknown>[] = []
@@ -182,7 +193,11 @@ export function toGeminiContents(messages: readonly ChatMessage[]): GeminiPayloa
     const parts: Record<string, unknown>[] = []
     if (message.content.length > 0) parts.push({ text: message.content })
     for (const toolCall of message.toolCalls ?? []) {
-      parts.push({ functionCall: { name: toolCall.name, args: safeParseArguments(toolCall.arguments) } })
+      const signature = toolCall.signature ?? (fillSignatures ? SKIP_SIGNATURE : undefined)
+      parts.push({
+        functionCall: { name: toolCall.name, args: safeParseArguments(toolCall.arguments) },
+        ...(signature !== undefined ? { thoughtSignature: signature } : {}),
+      })
     }
     // Gemini calls the assistant "model".
     if (parts.length > 0) contents.push({ role: 'model', parts })
@@ -207,6 +222,7 @@ async function* parseGeminiStream(
   body: ReadableStream<Uint8Array>,
   url: string,
   signal: AbortSignal | undefined,
+  reshaped?: Map<string, Reshaped[]>,
 ): AsyncGenerator<StreamChunk> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
@@ -255,6 +271,7 @@ async function* parseGeminiStream(
             text?: unknown
             thought?: unknown
             functionCall?: { name?: unknown; args?: unknown }
+            thoughtSignature?: unknown
           }
           if (typeof part.text === 'string' && part.text.length > 0) {
             // Gemini marks a reasoning part with `thought: true` and puts the content in
@@ -266,7 +283,9 @@ async function* parseGeminiStream(
             toolCalls.push({
               id: randomUUID(),
               name: part.functionCall.name,
-              arguments: JSON.stringify(part.functionCall.args ?? {}),
+              arguments: restoreArguments(JSON.stringify(part.functionCall.args ?? {}), reshaped?.get(part.functionCall.name)),
+              // Returned with the call next time, or Gemini 3 and later refuse the request.
+              ...(typeof part.thoughtSignature === 'string' && part.thoughtSignature.length > 0 ? { signature: part.thoughtSignature } : {}),
             })
           }
         }
