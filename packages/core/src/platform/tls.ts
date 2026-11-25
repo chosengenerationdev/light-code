@@ -56,9 +56,30 @@ export function buildCaBundle(
 ): (string | Buffer)[] | undefined {
   const extraFromEnv = readNodeExtraCaCerts(env)
   const extraFromConfig = configured ?? []
-  if (extraFromEnv.length === 0 && extraFromConfig.length === 0) return undefined
+  const system = systemCertificates(env)
+  if (extraFromEnv.length === 0 && extraFromConfig.length === 0 && system.length === 0) return undefined
 
-  return [...tls.rootCertificates, ...extraFromEnv, ...extraFromConfig]
+  return [...tls.rootCertificates, ...system, ...extraFromEnv, ...extraFromConfig]
+}
+
+let cachedSystem: string[] | undefined
+/**
+ * The operating system's trusted certificates (on Windows, the certificate store), where this Node can read them
+ * (`tls.getCACertificates('system')`, Node 22.15+). VS Code trusts them for its extensions; plain Node - Fire Code and
+ * the Node host - does not, so a server whose certificate is issued by the organisation's root (pushed to every PC's
+ * store) worked in VS Code and failed in Fire Code with "unable to verify the first certificate" (reported). Read
+ * once. `LIGHT_CODE_SYSTEM_CA=0` leaves them out.
+ */
+export function systemCertificates(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (env['LIGHT_CODE_SYSTEM_CA'] === '0') return []
+  if (cachedSystem !== undefined) return cachedSystem
+  const read = (tls as unknown as { getCACertificates?: (kind: string) => string[] }).getCACertificates
+  try {
+    cachedSystem = typeof read === 'function' ? read('system') : []
+  } catch {
+    cachedSystem = []
+  }
+  return cachedSystem
 }
 
 /**

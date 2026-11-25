@@ -197,6 +197,26 @@ describe('observer process supervision', () => {
     a.stop()
   })
 
+  // Asked: "when anti halucinator starts, will it read the full memory to context?" - a handoff carries only its own
+  // notes, so the memory is pinned: sent first to every process, after a handoff and after a crash alike.
+  it('sends the pinned memory first to every new process', async () => {
+    const fakes: FakeWatch[] = []
+    const a = agent(fakes)
+    a.start()
+    a.pin({ kind: 'memory', at, text: 'M1: Use -x.' })
+    await tick()
+    expect(fakes[0]!.sent.map((m) => (m['event'] as { kind?: string } | undefined)?.kind ?? m['type'])).toEqual(['start', 'memory'])
+    fakes[0]!.say({ type: 'handoff', state: 'notes', tokens: 800, pending: [{ kind: 'assistant', at, text: 'unreviewed' }] })
+    await tick()
+    fakes[0]!.exit(0)
+    await tick()
+    expect(fakes[1]!.sent.map((m) => (m['event'] as { kind?: string } | undefined)?.kind ?? m['type'])).toEqual(['start', 'memory', 'assistant'])
+    fakes[1]!.exit(1)
+    await tick()
+    expect(fakes[2]!.sent.map((m) => (m['event'] as { kind?: string } | undefined)?.kind ?? m['type'])).toEqual(['start', 'memory'])
+    a.stop()
+  })
+
   it('restarts a process that dies, and gives up after five starts in ten minutes', async () => {
     const fakes: FakeWatch[] = []
     const statuses: ObserverStatus[] = []

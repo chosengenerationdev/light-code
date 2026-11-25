@@ -24,6 +24,8 @@ export const USER_SCOPE_ONLY_KEYS = [
   'strategies',
   // Which model routes messages to specialists and judges strategy loops: the user's, never a repository's.
   'decisionModel',
+  // Is sent every search's query and the texts searched (skill descriptions, code): a repository must not choose where.
+  'reranker',
   // Reads the user's mail and their open workbooks. A repository must never switch it on.
   'office',
   // Names language-server programs to run when a file is edited.

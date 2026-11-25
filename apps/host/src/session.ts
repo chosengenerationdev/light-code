@@ -1,6 +1,6 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs'
 import type { CredentialSummary, JupyterHubSpec, MonitorExecutorChannel, CodebaseAgentChannel, MonitoringChannel } from '@light-code/core'
-import { CredentialPointerStore, createRelayDebugReader, createRelayLanguageModels, openWithDefaultApp, replaceFile, revealInFolder, runFastFs } from '@light-code/core'
+import { CredentialPointerStore, createRelayDebugEvaluator, createRelayDebugReader, createRelayLanguageModels, openWithDefaultApp, replaceFile, revealInFolder, runFastFs } from '@light-code/core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -549,7 +549,7 @@ export async function createSession(
      * A program paused in VS Code's debugger, read through the same relay - asked for so Fire Code can
      * investigate it. Every open VS Code window is asked. IntelliJ and PyCharm are not yet (deferred).
      */
-    ...(options.shared !== true ? { readDebugSession: createRelayDebugReader() } : {}),
+    ...(options.shared !== true ? { readDebugSession: createRelayDebugReader(), evaluateInDebugSession: createRelayDebugEvaluator() } : {}),
     ...(options.shared === true ? { sharedServer: true } : {}),
     ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
     ...(options.resumeInterrupted === true && options.shared !== true ? { resumeInterrupted: true } : {}),

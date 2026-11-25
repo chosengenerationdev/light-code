@@ -95,6 +95,7 @@ export default tseslint.config(
        * reaches the server, which reading the SDK could only suggest. Ingress only.
        */
       'packages/core/src/mcp/httpHeaders.test.ts',
+      'packages/core/src/mcp/httpsCertificate.test.ts',
       // A local server for the negotiate transport to talk to; the tool itself never imports node:http.
       'packages/core/src/tools/http.test.ts',
       // A stand-in model on loopback for the handoff test. Ingress only; the host reaches it through HttpClient.
@@ -106,6 +107,9 @@ export default tseslint.config(
       // A strategy kept with its chat across host restarts, against a loopback model. Ingress only.
       'apps/host/src/strategyPerChat.test.ts',
       'apps/host/src/decisionModel.test.ts',
+      'apps/host/src/reranker.test.ts',
+      'apps/host/src/typeAhead.test.ts',
+      'apps/host/src/memory.test.ts',
       'apps/host/src/personalDir.test.ts',
       'packages/core/src/webchat/chromeReal.test.ts',
       // The same, for two codebases' agents asking each other through a stand-in relay.
@@ -159,6 +163,9 @@ export default tseslint.config(
       'apps/host/src/strategyEndToEnd.test.ts',
       'apps/host/src/strategyPerChat.test.ts',
       'apps/host/src/decisionModel.test.ts',
+      'apps/host/src/reranker.test.ts',
+      'apps/host/src/typeAhead.test.ts',
+      'apps/host/src/memory.test.ts',
       'apps/host/src/personalDir.test.ts',
       'packages/core/src/webchat/chromeReal.test.ts',
       // The same, for two codebases' agents asking each other through a stand-in relay.

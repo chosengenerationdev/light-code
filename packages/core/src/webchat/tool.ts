@@ -24,7 +24,7 @@ export type AskWebChatParams = z.infer<typeof schema>
 
 export interface AskWebChatDeps {
   /** Where it goes, once set up: the approved backend address, and the model it names. Undefined: not set up. */
-  destination(): Promise<{ backend: string; model?: string | undefined } | undefined>
+  destination(): Promise<{ backend: string; method?: 'replay' | 'window'; model?: string | undefined } | undefined>
   /** Every rule in `guard.ts`, checked now; the sentence saying what is wrong, or undefined. */
   problem(): Promise<string | undefined>
   ask(question: string, signal?: AbortSignal): Promise<string>
@@ -42,7 +42,10 @@ export function createAskWebChatTool(deps: AskWebChatDeps): Tool<AskWebChatParam
       const where = destination === undefined ? 'the web chat (not set up yet)' : `${destination.backend}${destination.model !== undefined ? ` (model ${destination.model})` : ''}`
       return {
         kind: 'text',
-        text: `Sent through your Chrome, signed in as you, to the web chat's approved backend address only:\n${where}\n\nThe exact text sent:\n\n${params.question}`,
+        text:
+          destination?.method === 'window'
+            ? `Typed into the web chat window in your Chrome and sent, as you would; the answer is read from its reply from the approved backend address only:\n${where}\n\nThe exact text typed:\n\n${params.question}`
+            : `Sent through your Chrome, signed in as you, to the web chat's approved backend address only:\n${where}\n\nThe exact text sent:\n\n${params.question}`,
       }
     },
     async execute(params, context: ToolExecutionContext): Promise<ToolResult> {

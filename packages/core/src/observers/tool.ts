@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { Tool, ToolResult } from '../tools/types.js'
 import type { AuditIndex } from './auditIndex.js'
 import { readAudit, type AuditQuery, type AuditRecord, type AuditRecordType } from './journal.js'
+import { renderRolesReport, rolesReport } from './report.js'
 
 /**
  * Reading the Auditor's record back, for analysis later - asked for directly: "provide tools to agents to read
@@ -17,9 +18,13 @@ const TYPES = ['event', 'finding', 'alert', 'note', 'status'] as const
 
 const schema = z.object({
   action: z
-    .enum(['records', 'summary'])
+    .enum(['records', 'summary', 'roles'])
     .default('summary')
-    .describe('summary: counts by type, tool and day, every alert, the sessions. records: the matching records themselves, newest first.'),
+    .describe(
+      'summary: counts by type, tool and day, every alert, the sessions. records: the matching records themselves, newest first. ' +
+        'roles: which roles and models took part in a task - the main agent\'s model and mode, each specialist with its model, the decision model, reranker and reviewers.',
+    ),
+  task: z.string().optional().describe('For roles (and to narrow the others): a task id, or "current" for this chat (the default for roles).'),
   source: z
     .enum(['local', 'index'])
     .default('local')
@@ -66,6 +71,14 @@ export function auditRow(record: AuditRecord): Record<string, unknown> {
     } else if (e.kind === 'decision') {
       row['decision'] = e.outcome
       row['text'] = `${e.purpose}: ${e.question}${e.probabilities !== undefined ? ` ${JSON.stringify(e.probabilities)}` : ''}`
+    } else if (e.kind === 'behind') {
+      row['area'] = e.area
+      row['text'] = e.summary
+    } else if (e.kind === 'consultation') {
+      row['role'] = e.role
+      row['model'] = e.model
+      row['ok'] = e.ok
+      row['text'] = `${e.name} (${e.model}), ${String(Math.round(e.ms / 1000))} s${e.ok ? '' : ', failed'}`
     } else row['text'] = e.text
     if (e.kind === 'turnStart') {
       row['mode'] = e.mode
@@ -120,7 +133,7 @@ export function summariseAudit(records: readonly AuditRecord[]): Record<string, 
   }
 }
 
-export function createReadAuditTool(deps: { storageDir: string; workspace: string | undefined; workspaceId: string | undefined; index: () => AuditIndex | undefined }): Tool<ReadAuditParams> {
+export function createReadAuditTool(deps: { storageDir: string; workspace: string | undefined; workspaceId: string | undefined; index: () => AuditIndex | undefined; task?: () => string | undefined }): Tool<ReadAuditParams> {
   return {
     name: 'read_audit_log',
     group: 'read',
@@ -134,7 +147,10 @@ export function createReadAuditTool(deps: { storageDir: string; workspace: strin
       const from = time(params.from, false) ?? (params.hours !== undefined ? Date.now() - params.hours * 3_600_000 : undefined)
       if (params.from !== undefined && time(params.from, false) === undefined) return { content: `"${params.from}" is not a date.`, isError: true }
       if (params.until !== undefined && until === undefined) return { content: `"${params.until}" is not a date.`, isError: true }
+      const task = params.task === undefined || params.task === 'current' ? (params.action === 'roles' || params.task === 'current' ? deps.task?.() : undefined) : params.task
+      if (params.action === 'roles' && task === undefined) return { content: 'There is no task to report on yet: send a message in this chat first, or name a task id from a summary.', isError: true }
       const query: AuditQuery = {
+        ...(task !== undefined ? { task } : {}),
         ...(from !== undefined ? { from } : {}),
         ...(until !== undefined ? { until } : {}),
         ...(params.types !== undefined ? { types: params.types as AuditRecordType[] } : {}),
@@ -142,7 +158,7 @@ export function createReadAuditTool(deps: { storageDir: string; workspace: strin
         ...(params.contains !== undefined ? { contains: params.contains } : {}),
         ...(params.session !== undefined ? { session: params.session } : {}),
         ...(params.allWorkspaces === true ? { allWorkspaces: true } : {}),
-        limit: params.action === 'summary' ? 2000 : (params.limit ?? 200),
+        limit: params.action === 'summary' || params.action === 'roles' ? 20_000 : (params.limit ?? 200),
       }
       let records: AuditRecord[]
       let note: string
@@ -151,7 +167,8 @@ export function createReadAuditTool(deps: { storageDir: string; workspace: strin
         if (index === undefined) return { content: 'No OpenSearch audit index is configured here: use source "local", or connect OpenSearch in Settings → Search and switch on "Also record in OpenSearch" for the Auditor (Settings → Project).', isError: true }
         try {
           const found = await index.search(query, deps.workspaceId)
-          records = found.records
+          // The index has no task field to filter on; the record carries it.
+          records = task !== undefined ? found.records.filter((record) => record.task === task) : found.records
           note = `From ${index.index}: ${String(records.length)} of ${String(found.total)} matching record(s).`
         } catch (error) {
           return { content: error instanceof Error ? error.message : String(error), isError: true }
@@ -164,6 +181,7 @@ export function createReadAuditTool(deps: { storageDir: string; workspace: strin
       if (records.length === 0) {
         return { content: `${note}\nNothing matched. The Auditor records only while it is switched on (Settings → Project → Auditor).` }
       }
+      if (params.action === 'roles') return { content: `${note}\n\n${renderRolesReport(rolesReport(records))}` }
       const body = params.action === 'summary' ? summariseAudit(records) : records.map(auditRow)
       return { content: `${note}\n${JSON.stringify(body, null, 2)}` }
     },

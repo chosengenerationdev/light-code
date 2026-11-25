@@ -27,9 +27,13 @@ configure a provider.
 - **MCP servers** over stdio or Streamable HTTP, with per-server and per-tool controls.
 - **Approval that shows ground truth** — the literal command, the computed diff — never the
   model's description of what it intends to do.
-- **Modes.** Code, Ask (read-only), Agent team, and **Auto** — shell-first working, where
-  reading and searching and compiling run without stopping you, and anything that writes,
-  deletes or executes still asks. What counts as read-only is a list you can see and add to.
+- **Modes.** **Auto** (the default) — shell-first working, where reading and searching and
+  compiling run without stopping you, and anything that writes, deletes or executes still asks;
+  **Ask** (read-only); and **Agent team**. What counts as read-only is a list you can see and add to.
+- **Suggestions while typing**, opt-in (Settings → Project): Tab takes the next word, Ctrl+Space
+  the whole line, from a small fast model you choose for it.
+- **Memory.** Short corrections you give the agent are kept for the codebase and applied in every
+  later chat; you can read, edit and remove each one.
 - **Excel and Outlook on Windows**, opt-in and off by default. Attach to the workbook you
   already have open and trace a `#DIV/0!` back through its precedents across sheets; search
   your mail; compose a message with attachments and embedded images, which it **shows you
@@ -83,12 +87,53 @@ configure a provider.
   conversation you are in, and leave a transcript you can open in an editor tab.
 - **Notifications**, including a Markdown report the notification can open.
 
+### Watching and steering the agent
+
+- **The Auditor** records everything the agent does — every request, reasoning step, tool call,
+  approval and result — to a journal on your machine (and, optionally, your own OpenSearch
+  index), and alerts you to dangerous or refused actions. **Report on this chat** tells you which
+  roles and models took part and, request by request, what happened behind the scenes: each
+  decision model choice with its probability, each reranker run, the memory used, specialists
+  consulted, retries — so you can check things went the way you wanted.
+- **The Anti Hallucinator** is a second model reviewing each step as it happens. It tells the
+  agent when it claims something the evidence does not support, drifts from your request, or
+  loops — and holds it to the guidance in the codebase's memory.
+- Both run as separate processes with their own context, and hand off to a fresh process before
+  their context fills.
+
+### A team of specialists
+
+- **Agent team mode** consults specialist roles — planner, tester, reviewer, or roles you define —
+  each in its own process and context, so the main chat stays lean.
+- **Every seat takes a provider and then a model from it**: one provider profile serves every
+  role, the decision model, the reranker and the reviewers, each on the model you pick.
+- **Strategies**: draw how the specialists work together — loops between two roles with a round
+  limit or a stop condition, boxes whose steps run in parallel, and data contracts on each
+  connector, checked automatically.
+- **A decision model** (such as D3 from vLLM Semantic Router) can route each message to the right
+  specialist, judge loop conditions, choose a strategy's next step, and pick the skill and tool a
+  request needs — with calibrated probabilities, never granting anything.
+- **A reranker** (such as BGE) sharpens finding tools, skills, team skills and code — and, with a
+  decision model, narrows the choice to the best ten before it decides.
+
+### Your organisation's tools
+
+- **Confluence, Jira, Bitbucket, Jenkins and AutoSys** — read and write with your own token; every
+  change shown and approved first. AutoSys answers run times, ETAs, usual start times and every
+  predecessor of a job.
+- **Your organisation's own web chat** (such as an internal Gemini) as a consultant, through your
+  own Chrome — only to the backend address you approved.
+- **GitHub Copilot's models**, reused from VS Code, in Fire Code and the Node host too.
+- **Reading a paused debug session**, any language: the call stack, variables, a DataFrame's
+  columns — and, with your approval, an expression such as `df.head(50).to_string()`.
+- **HTTP MCP servers behind your certificates**: the Windows certificate store, a CA file per
+  server, or — knowingly — no verification.
+
 ### Spending less
 
-- **Junior mode.** A cheap model does the work and consults Claude — through your own Claude
-  CLI — for the plan. The expert splits the work into checkpoints and reviews each one, and
-  consultations continue a single conversation, which measured about nineteen times cheaper
-  than starting cold each time.
+- **A cheaper model with an expert.** A cheap model does the work and consults Claude — through
+  your own Claude CLI — or any stronger model for the plan. Consultations continue a single
+  conversation, which measured about nineteen times cheaper than starting cold each time.
 - **A budget for that expert**, per chat: stop after so many dollars or so many
   consultations. Set it in the chat header, adjust it mid-conversation, and the expert is
   told what remains so it plans to fit. It also **estimates what the task will cost** when it
@@ -119,7 +164,7 @@ Minimalism is the point, not a stage it will grow out of:
 
 1. Install the extension and click the Light Code icon in the Activity Bar.
 2. Open Settings (the icon in the panel header) → **Providers** → **Add Provider**.
-3. Pick a preset, paste an API key, choose a model, and **Save**.
+3. Pick a preset and paste an API key - the model list appears by itself - choose a model, and **Save**.
 4. Start chatting.
 
 Everything is configured through the panel. You never need to hand-edit a file, though you
@@ -128,7 +173,10 @@ can — the settings UI and the config file share one schema, so both fail the s
 ### Several codebases at once, on Windows
 
 **Fire Code** puts every codebase you work on in one window, each with its own Light Code
-agent working in parallel — background chats keep going while you look at another. It can use the
+agent working in parallel — background chats keep going while you look at another, and agents in
+different codebases can ask each other for help. A Rust helper reads huge logs, CSV, Excel and
+SQLite files and searches network shares in seconds; a monitoring dashboard runs checks you
+describe in chat; JupyterHub folders open as codebases. It can use the
 settings a codebase already has (the VS Code extension's, or IntelliJ/PyCharm's), installs with
 `npm i -g @chosengeneration/fire-code` without compiling or downloading anything, and is
 described in [apps/sun/README.md](apps/sun/README.md).
@@ -158,8 +206,10 @@ Read this before using it anywhere sensitive.
 > endpoints, no telemetry, no update checks, and no remote assets. The only hosts it
 > contacts are the model gateway, the MCP servers, and — if you enable indexing — the vector
 > store and embedding endpoint named in your config. Each other integration you switch on (S3,
-> Confluence, Jira, Bitbucket, Jenkins, AutoSys, the usage dashboard's shared store, a JupyterHub codebase in Fire Code) contacts
-> only the address you gave it.
+> Confluence, Jira, Bitbucket, Jenkins, AutoSys, the usage dashboard's shared store, a JupyterHub codebase in Fire Code,
+> the decision model, the reranker, the Auditor's and Anti Hallucinator's models, your organisation's web chat) contacts
+> only the address you gave it — the web chat only the backend address you approved. Through `http_request`, the agent
+> can reach only hosts you name in the chat, and every request asks first.
 
 **Indexing is the largest egress in the product.** Enabling it sends the contents of your
 workspace to the embedding endpoint you configured. It is opt-in, ships disabled, and

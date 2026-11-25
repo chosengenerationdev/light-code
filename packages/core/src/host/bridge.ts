@@ -1,7 +1,7 @@
 import { createHash, createPrivateKey, randomBytes, randomUUID } from 'node:crypto'
 import { ApigeeMtlsAuthStrategy } from '../providers/auth/apigeeMtls.js'
 import { AUTOSYS_BASIC_VALUE_REF, AUTOSYS_CLIENT_SECRET_REF, AUTOSYS_PASSPHRASE_REF, gatewayFromSettings, gatewayView, withBasicCredentials, withHeader } from '../atlassian/autosysGateway.js'
-import type { AddonView, AutosysGatewaySecret, AutosysGatewaySettings, DeleteEverywherePlan, TeamRepoRetire, TeamRepoSettings, TeamRepoStatus, TeamSkillState } from '../agent/protocol.js'
+import type { WebChatTestResult, AddonView, AutosysGatewaySecret, AutosysGatewaySettings, DeleteEverywherePlan, TeamRepoRetire, TeamRepoSettings, TeamRepoStatus, TeamSkillState } from '../agent/protocol.js'
 import type { HttpClient, TlsOptions } from '../platform/http.js'
 import { watch as watchPath, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -14,17 +14,20 @@ import { redact } from '../logging/redact.js'
 import { cleanSuggestion, TYPE_AHEAD_MIN_CHARS, typeAheadMessages } from '../agent/typeAhead.js'
 import { shortenPaths } from './startupPaths.js'
 import { readWebChatSetup, webChatSetupFile, writeWebChatSetup, type WebChatSetup } from '../webchat/setup.js'
-import { chromeServerProblems, webChatAddressProblem } from '../webchat/guard.js'
-import { askWebChat, isChromeDevToolsServer, runScript, selectWebChatPage, type ChromeAccess } from '../webchat/chrome.js'
+import { chromeMode, chromeServerProblems, fixChromeServer, webChatAddressProblem, withChromeMode } from '../webchat/guard.js'
+import { replyShape } from '../webchat/answer.js'
+import { askThroughWindow, askWebChat, isChromeDevToolsServer, runScript, selectWebChatPage, type ChromeAccess } from '../webchat/chrome.js'
 import { candidatesFrom, capturePhrase, type CaptureCandidate, type CapturedRequest } from '../webchat/capture.js'
 import { readCaptureScript, typePhraseScript, watchScript } from '../webchat/inpage.js'
 import { createAskWebChatTool } from '../webchat/tool.js'
+import { seatLabel, seatProfile as withSeatModel } from '../providers/seat.js'
+import { DEFAULT_CANDIDATES, DEFAULT_MIN_SCORE, rerank, rerankEndpointProblem, reorder, type Reranking, type RerankerModel } from '../rerank/rerank.js'
 import { decide, decisionEndpointProblem, DEFAULT_LOOP_THRESHOLD, DEFAULT_ROUTE_THRESHOLD, loopVerdict, type Decision, type DecisionModel, type DecisionQuestion } from '../decision/decide.js'
 import { describeRoute, routedRole, routeQuestion } from '../decision/route.js'
 import { DEFAULT_FIRST_PASS_THRESHOLD, describeStep, FIRST_PASS_QUESTION } from '../decision/firstPass.js'
 import { DEFAULT_HANDOVER_THRESHOLD, describeSuggestions, handoverQuestion, isSkillToolPicks, newWorkQuestion, picked, roleSuggestion, skillQuestion, toolQuestion, triageQuestion, withRecentChat, type SkillToolPicks } from '../decision/more.js'
 import type { ObservedEvent } from '../observers/events.js'
-import type { DecisionModelSettings, DecisionTestResult } from '../agent/protocol.js'
+import type { DecisionModelSettings, DecisionTestResult, RerankerSettings } from '../agent/protocol.js'
 import { compactHistory, isContextOverflow, isSummaryMessage } from '../context/compact.js'
 import { repairUnansweredToolCalls } from '../agent/repairHistory.js'
 import { RESUME_PROMPT, resumeDecision } from '../agent/resume.js'
@@ -45,6 +48,7 @@ import {
   readCodebaseInstructions,
   renderCodebaseInstructions,
 } from '../agent/codebaseInstructions.js'
+import { addMemory, deleteMemory, editMemory, MEMORY_SHOWN_CHARS, MEMORY_SHOWN_MAX, memoryPath, noteMemoryUsed, readMemory, renderMemoryForAgent, renderMemoryForGuard, selectMemory, type MemoryEntry } from '../memory/store.js'
 import { readToolCredential } from '../python/toolCredentials.js'
 import type { CredentialSummary } from '../secrets/credentials.js'
 import { cleanSkillDefaults, findPlaceholders, renderSkillDefaults, skillDefaultsReadNote } from '../skills/defaults.js'
@@ -151,7 +155,7 @@ import {
 import { EXPERT_GUIDANCE, SEAT_FITS } from '../agents/seats.js'
 import { ASK_CLAUDE_TOOL } from '../tools/askExpert.js'
 import type { Tool } from '../tools/types.js'
-import { createReadDebugSessionTool } from '../tools/debugSession.js'
+import { createEvaluateInDebugSessionTool, createReadDebugSessionTool } from '../tools/debugSession.js'
 import { createExportConfigTool } from '../tools/exportConfig.js'
 import { ConfluenceClient } from '../confluence/client.js'
 import {
@@ -705,6 +709,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     workspace: workspaceRoot,
     workspaceId: workspaceRoot !== undefined ? workspaceAuditFolder(workspaceRoot) : undefined,
     index: () => observerIndex,
+    task: () => activeTaskId,
   })
   // Given the open project, so per-project settings apply to every read without each call site
   // having to remember — one owner, as with every default in this file.
@@ -758,6 +763,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   const manifestsRoot = services.codebaseDir ?? storageDir
   /** What every chat on this codebase is told; see `agent/codebaseInstructions.ts`. */
   const codebaseInstructionsFile = codebaseInstructionsPath({ codebaseDir: services.codebaseDir, storageDir, workspaceRoot: projectRoot })
+  /** The codebase's memory of the user's lasting corrections (`memory/store.ts`); beside the instructions, outside the repo. */
+  const memoryFile = memoryPath({ codebaseDir: services.codebaseDir, storageDir, workspaceRoot: projectRoot })
+  /** The entries as the Anti Hallucinator was last shown them, so its "M3" means the third of these. */
+  let memoryShown: MemoryEntry[] = []
+  const memoryOn = (config: LightCodeConfig): boolean => memoryFile !== undefined && config.observers?.antiHallucination?.memory !== false
   if (services.codebaseDir !== undefined) {
     const shared = path.join(services.codebaseDir, 'index-manifests')
     void fs
@@ -2605,6 +2615,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedComposerCompletion = false
   /** Settings → Agents → Decision model, and the label of its profile when one is set up and usable. */
   let cachedDecision: DecisionModelSettings | undefined
+  /** Settings → Search → Reranker: the model when one is set up and usable, with its settings. */
+  let cachedReranker: { model: RerankerModel; settings: RerankerSettings; label: string } | undefined
   let cachedDecisionLabel: string | undefined
   /** The mode of the turn running now: role suggestions are made in Agent team only. */
   let turnModeId: string | undefined
@@ -3254,6 +3266,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedUnlimitedSteps = config.unlimitedSteps === true
     cachedComposerCompletion = config.composerCompletion === true
     cachedDecision = config.decisionModel
+    cachedReranker = rerankerFrom(config)
     // The web chat's saved capture: read here so the Chrome server is withheld from the agent from the first message.
     await loadWebChat()
     cachedDecisionLabel = decisionModelFrom(config)?.label
@@ -3747,6 +3760,25 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Shared by every chat of a codebase in Fire Code (`codebaseDir`), so a chat starting after a crash or a
     // sleep offers the servers' tools at once instead of waiting for each to start (`mcp/toolCache.ts`).
     fileMcpToolCache(mcpToolCacheFile(services.codebaseDir ?? storageDir)),
+    /*
+     * HTTP servers go out through Light Code's own client, with the machine's certificate settings (Settings -> Network),
+     * the server's own, and the Windows certificate store - the same in VS Code and Fire Code (reported: "unable to
+     * verify the first certificate" in Fire Code for a server that worked in VS Code).
+     */
+    async (_name, server) => {
+      if (httpClient.fetchFunction === undefined) return undefined
+      const config = await loadSettings()
+      const own = (server as { tls?: { caFile?: string; rejectUnauthorized?: boolean } }).tls
+      const tls = await resolveConnectionTls({
+        ...(config.tls !== undefined ? { global: config.tls } : {}),
+        ...(own !== undefined ? { connection: { ...(own.caFile !== undefined ? { caFile: own.caFile } : {}), ...(own.rejectUnauthorized !== undefined ? { rejectUnauthorized: own.rejectUnauthorized } : {}) } } : {}),
+        ...(config.certDir !== undefined ? { certDir: config.certDir } : {}),
+        onPaths: (paths) => {
+          void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch(() => undefined)
+        },
+      })
+      return httpClient.fetchFunction(tls ?? {})
+    },
   )
 
   function postMcp(): void {
@@ -4186,7 +4218,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * for it instead of reading the local skills it does have.
      */
     if (teamSkills !== undefined) {
-      combined.register(createSearchTeamSkillsTool({ ...teamSkills, observer: searchLog, currentProject: currentProjectNames, defaultScope: defaultSearchScope }))
+      combined.register(createSearchTeamSkillsTool({ ...teamSkills, observer: searchLog, currentProject: currentProjectNames, defaultScope: defaultSearchScope, ...withReranking('teamSkills') }))
     }
     if (search !== undefined) {
       combined.register(
@@ -4207,7 +4239,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * and the model would keep reaching for it instead of using search_files.
      */
     if (codebase !== undefined) {
-      combined.register(createSearchCodebaseTool({ ...codebase, observer: searchLog }))
+      combined.register(createSearchCodebaseTool({ ...codebase, observer: searchLog, ...withReranking('codebase') }))
     }
 
     /*
@@ -4348,6 +4380,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (services.readDebugSession !== undefined) {
       combined.register(createReadDebugSessionTool({ read: services.readDebugSession }))
     }
+    if (services.evaluateInDebugSession !== undefined) {
+      combined.register(createEvaluateInDebugSessionTool({ evaluate: services.evaluateInDebugSession }))
+    }
 
     /*
      * Confluence, once switched on and pointed at a site. Absent otherwise rather than present and
@@ -4479,6 +4514,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           accessibleTo: (name) => scheduleToolAccess?.(name) ?? true,
           ...(docs !== undefined ? { retrieval: docs } : {}),
           observer: searchLog,
+          ...withReranking('docs'),
         }),
       )
     }
@@ -5106,9 +5142,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     destination: async () => {
       const setup = cachedWebChat ?? (await loadWebChat())
       if (setup === undefined) return undefined
-      const backend = new URL(setup.request.path, new URL(setup.pageUrl).origin).href
+      const backend = setup.backendUrl ?? new URL(setup.request.path, new URL(setup.pageUrl).origin).href
       const model = setup.modelOverride ?? setup.model
-      return { backend, ...(model !== undefined ? { model } : {}) }
+      return { backend, method: setup.method ?? 'replay', ...(model !== undefined ? { model } : {}) }
     },
     problem: async () => {
       const setup = cachedWebChat ?? (await loadWebChat())
@@ -5118,8 +5154,70 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const setup = cachedWebChat ?? (await loadWebChat())
       const server = webChatServer()
       if (setup === undefined || server === undefined) throw new Error('The web chat or its Chrome DevTools MCP server is not available.')
-      return askWebChat(chromeAccess(server), setup, question)
+      const throughWindow = async (why?: string): Promise<string> => {
+        const read = await askThroughWindow(chromeAccess(server), setup, question)
+        const how = why === undefined ? '' : `\n\n(Sent through the chat window: the direct request did not work - ${why})`
+        return read.from === 'screen' ? `${read.answer}\n\n(Read off the web chat's screen: no reply from its backend was seen.)${how}` : `${read.answer}${how}`
+      }
+      if (setup.method === 'window') return throughWindow()
+      // Direct to the approved address first (asked for: "even if the api site is different, it should work if I approved
+      // it"); the chat window when that is refused or fails - never when the web chat says to sign in, which the window
+      // would only hit too, nor when the reply has changed shape.
+      try {
+        return await askWebChat(chromeAccess(server), setup, question)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (/HTTP 40[13]/.test(message) || /not where the capture found it/.test(message)) throw error
+        logger.info(`web chat: the direct request did not work (${message}); trying the chat window`)
+        return throughWindow(message)
+      }
     },
+  }
+
+  /**
+   * The Test button: one fixed question, direct to the approved address and then through the chat window, each reported
+   * on its own - so the user sees which way works here, rather than only that the fallback hid a failure.
+   */
+  let webChatTesting = false
+  async function testWebChat(): Promise<void> {
+    if (webChatTesting) return
+    webChatTesting = true
+    try {
+      const setup = cachedWebChat ?? (await loadWebChat())
+      const server = webChatServer()
+      const results: WebChatTestResult[] = []
+      const fail = (text: string): void => {
+        post({ type: 'webChatTest', results: [{ way: 'direct', ok: false, text, ms: 0 }, { way: 'window', ok: false, text, ms: 0 }] })
+      }
+      if (setup === undefined) return fail('The web chat is not set up.')
+      if (server === undefined) return fail('The Chrome DevTools MCP server chosen for the web chat is not connected.')
+      const problem = await webChatProblem(setup.pageUrl, server)
+      if (problem !== undefined && problem.length > 0) return fail(problem)
+      const question = 'Reply with the single word: ready'
+      const clip = (text: string): string => (text.length > 300 ? `${text.slice(0, 300)}…` : text)
+      post({ type: 'webChatTest', running: 'direct' })
+      let started = Date.now()
+      let reply: string | undefined
+      const shape = (): { shape?: string } => (reply === undefined ? {} : { shape: replyShape(reply) })
+      try {
+        const answer = await askWebChat(chromeAccess(server), setup, question, { onReply: (text) => (reply = text) })
+        results.push({ way: 'direct', ok: true, text: clip(answer), ms: Date.now() - started, ...shape() })
+      } catch (error) {
+        results.push({ way: 'direct', ok: false, text: error instanceof Error ? error.message : String(error), ms: Date.now() - started, ...shape() })
+      }
+      post({ type: 'webChatTest', results, running: 'window' })
+      started = Date.now()
+      reply = undefined
+      try {
+        const read = await askThroughWindow(chromeAccess(server), setup, question, { onReply: (text) => (reply = text) })
+        results.push({ way: 'window', ok: true, text: clip(read.answer), ms: Date.now() - started, from: read.from, ...shape() })
+      } catch (error) {
+        results.push({ way: 'window', ok: false, text: error instanceof Error ? error.message : String(error), ms: Date.now() - started, ...shape() })
+      }
+      post({ type: 'webChatTest', results })
+    } finally {
+      webChatTesting = false
+    }
   }
 
   async function postWebChat(message?: string): Promise<void> {
@@ -5132,7 +5230,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ? {
             setup: {
               pageUrl: setup.pageUrl,
-              backend: new URL(setup.request.path, new URL(setup.pageUrl).origin).href,
+              backend: setup.backendUrl ?? new URL(setup.request.path, new URL(setup.pageUrl).origin).href,
+              via: setup.method ?? 'replay',
               method: setup.request.method,
               ...(setup.model !== undefined ? { model: setup.model } : {}),
               ...(setup.modelOverride !== undefined ? { modelOverride: setup.modelOverride } : {}),
@@ -5142,12 +5241,48 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           }
         : {}),
       chrome: {
-        servers: await Promise.all(servers.map(async (name) => ({ name, problems: await chromeProblems(name), ...(await npxRegistryFor(name)) }))),
+        servers: await Promise.all(servers.map(async (name) => {
+          const problems = await chromeProblems(name)
+          const mode = chromeMode(mcp.serverConfig(name))
+          return { name, problems, fixable: problems.length > 0 && fixChromeServer(mcp.serverConfig(name)) !== undefined, ...(mode !== undefined ? { mode } : {}), ...(await npxRegistryFor(name)) }
+        })),
         ...(setup?.server !== undefined ? { chosen: setup.server } : {}),
       },
       ...(setup !== undefined ? { hostProblem: (await hostProblem(setup.pageUrl).catch((error: unknown) => String(error))) ?? '' } : {}),
       ...(message !== undefined ? { message } : {}),
     })
+  }
+
+  /**
+   * "Fix it for me" on a Chrome server the web chat cannot use yet (asked for: "its tiring for me to go back and forth,
+   * can you fix these for good"): the entry is rewritten with what the web chat needs (`fixChromeServer`) and saved
+   * through the MCP tab's own save, which restarts the server. The panel shows the new arguments.
+   */
+  async function fixWebChatServer(server: string): Promise<void> {
+    const fixed = fixChromeServer(mcp.serverConfig(server))
+    if (fixed === undefined) {
+      await postWebChat(`"${server}" cannot be fixed automatically - change it in Settings → MCP.`)
+      return
+    }
+    await handleSaveMcpServer(server, server, fixed)
+    const args = (fixed as { args?: string[] }).args ?? []
+    await postWebChat(`Fixed "${server}": ${(fixed as { command: string }).command} ${args.join(' ')}. It is restarting with these options.`)
+  }
+
+  /** "Which Chrome": the person's own (--autoConnect) or one the server starts; saved like an MCP tab edit, restarting it. */
+  async function setWebChatChrome(server: string, mode: 'own' | 'started'): Promise<void> {
+    const config = mcp.serverConfig(server)
+    const changed = config === undefined ? undefined : withChromeMode(config, mode)
+    if (changed === undefined) {
+      await postWebChat(`"${server}" names a Chrome by address - change it in Settings → MCP.`)
+      return
+    }
+    await handleSaveMcpServer(server, server, changed)
+    await postWebChat(
+      mode === 'own'
+        ? `"${server}" now uses your own Chrome. Switch remote debugging on once at chrome://inspect/#remote-debugging in that Chrome (Chrome 144 or newer).`
+        : `"${server}" now opens a Chrome of its own. Sign in to the web chat in that Chrome once; it remembers. Only one app at a time can use it.`,
+    )
   }
 
   function stopWebChatCapture(): void {
@@ -5222,6 +5357,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               ...(candidate.model !== undefined ? { model: candidate.model } : {}),
               answerPreview: candidate.answerPreview,
               fromPage: candidate.fromPage,
+              window: candidate.window,
             })),
             refused,
           })
@@ -5247,13 +5383,90 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * nothing about it exists: no routing, no loop verdicts, nothing shown. Its own auth strategy, beside the observers',
    * so asking it never throws away the chat's token.
    */
+  /** The reranker's profile when one is chosen and is OpenAI-compatible (its server answers /rerank, not chat). */
+  function rerankerFrom(config: LightCodeConfig): { model: RerankerModel; settings: RerankerSettings; label: string } | undefined {
+    const settings = config.reranker
+    const id = settings?.profileId
+    if (settings === undefined || id === undefined) return undefined
+    const found = (config.profiles ?? []).find((candidate) => candidate.id === id)
+    if (found === undefined || found.wireFormat !== 'openai') return undefined
+    const profile = withSeatModel(found, settings.model)
+    const endpoint = settings.endpoint?.trim()
+    return { model: { profile, http: httpClient, auth: observerStrategy(config, found), ...(endpoint !== undefined && endpoint !== '' ? { endpoint } : {}) }, settings, label: seatLabel(found, settings.model) }
+  }
+
+  /**
+   * What a search is given to rerank with, or undefined: no reranker, or that use switched off. Each search fetches
+   * `candidates` and keeps what scores `minScore` or more.
+   */
+  function rerankingFor(use: 'docs' | 'teamSkills' | 'codebase' | 'picks', timeoutMs?: number): Reranking | undefined {
+    const found = cachedReranker
+    if (found === undefined || found.settings[use] === false) return undefined
+    const what = { docs: 'Tool and skill search', teamSkills: 'Team skills search', codebase: 'Codebase search', picks: 'Skill and tool picks' }[use]
+    return {
+      scores: (query, texts, signal) => rerank(found.model, query, texts, { ...(signal !== undefined ? { signal } : {}), ...(timeoutMs !== undefined ? { timeoutMs } : {}) }),
+      minScore: found.settings.minScore ?? DEFAULT_MIN_SCORE,
+      candidates: found.settings.candidates ?? DEFAULT_CANDIDATES,
+      // For the Auditor: what it put first, what it set aside, or that it did not answer and the search kept its order.
+      report: (outcome) =>
+        observerHub.event({
+          kind: 'behind',
+          at: Date.now(),
+          area: 'reranker',
+          summary: outcome.ok
+            ? `${what}: the reranker (${found.model.profile.model}) reordered ${String(outcome.candidates)} candidates for "${outcome.query.slice(0, 80)}" in ${(outcome.ms / 1000).toFixed(1)} s - first ${outcome.first.map((f) => `${f.label} (${f.score.toFixed(2)})`).join(', ') || 'none'}${outcome.dropped > 0 ? `; set aside ${String(outcome.dropped)} below ${String(found.settings.minScore ?? DEFAULT_MIN_SCORE)}` : ''}.`
+            : `${what}: the reranker (${found.model.profile.model}) did not answer (${outcome.error ?? 'no scores'}), so the search kept its own order.`,
+        }),
+    }
+  }
+  const withReranking = (use: 'docs' | 'teamSkills' | 'codebase'): { reranking?: Reranking } => {
+    const reranking = rerankingFor(use)
+    return reranking !== undefined ? { reranking } : {}
+  }
+
+  async function postReranker(error?: string, saved?: boolean): Promise<void> {
+    const config = await loadSettings()
+    const found = rerankerFrom(config)
+    post({
+      type: 'reranker',
+      settings: config.reranker ?? {},
+      profiles: (config.profiles ?? []).filter((profile) => profile.wireFormat === 'openai').map((profile) => ({ id: profile.id, label: profile.label })),
+      ...(found !== undefined ? { label: found.label } : {}),
+      ...(error !== undefined ? { error } : {}),
+      ...(saved === true ? { saved } : {}),
+    })
+  }
+
+  /** Test reranker: one question and four texts, one plainly the answer, so the order shows whether it works. */
+  async function testReranker(): Promise<void> {
+    const found = rerankerFrom(await loadSettings())
+    const query = 'How do I deploy the pricing service to production?'
+    const texts = [
+      'Recipe for a lemon cake: flour, sugar, eggs and lemons.',
+      'Deploying the pricing service: build the image, push it to the registry, then run the production release pipeline.',
+      'The quarterly holiday calendar for the London office.',
+      'Unit tests for the date parser and how to run them.',
+    ]
+    if (found === undefined) {
+      post({ type: 'rerankerTest', result: { ok: false, query, order: [], error: 'Choose a provider profile for the reranker first.', ms: 0 } })
+      return
+    }
+    const result = await rerank(found.model, query, texts, { timeoutMs: 20_000 })
+    const order = (result.scores ?? []).map((score, index) => ({ text: texts[index] ?? '', score, expectedFirst: index === 1 })).sort((a, b) => b.score - a.score)
+    post({
+      type: 'rerankerTest',
+      result: { ok: result.ok, query, order, ms: result.ms, ...(result.endpoint !== undefined ? { endpoint: result.endpoint } : {}), ...(result.error !== undefined ? { error: result.error } : {}) },
+    })
+  }
+
   function decisionModelFrom(config: LightCodeConfig): { model: DecisionModel; label: string } | undefined {
     const id = config.decisionModel?.profileId
     if (id === undefined) return undefined
-    const profile = (config.profiles ?? []).find((candidate) => candidate.id === id)
-    if (profile === undefined || profile.wireFormat !== 'openai') return undefined
+    const found = (config.profiles ?? []).find((candidate) => candidate.id === id)
+    if (found === undefined || found.wireFormat !== 'openai') return undefined
+    const profile = withSeatModel(found, config.decisionModel?.model)
     const endpoint = config.decisionModel?.endpoint
-    return { model: { profile, http: httpClient, auth: observerStrategy(config, profile), ...(endpoint !== undefined && endpoint.trim() !== '' ? { endpoint: endpoint.trim() } : {}) }, label: profile.label }
+    return { model: { profile, http: httpClient, auth: observerStrategy(config, found), ...(endpoint !== undefined && endpoint.trim() !== '' ? { endpoint: endpoint.trim() } : {}) }, label: seatLabel(found, config.decisionModel?.model) }
   }
 
   /** One question, recorded in the audit record with its probabilities and what was done with it. */
@@ -5457,8 +5670,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (settings?.profileId === undefined) {
       return { problem: role === 'auditor' ? 'Recording only: choose a model for the Auditor to have each step reviewed and judged as well.' : 'Choose a model for the Anti Hallucinator.' }
     }
-    const profile = (config.profiles ?? []).find((p) => p.id === settings.profileId)
-    if (profile === undefined) return { problem: `${name}'s provider profile no longer exists. Choose another.` }
+    const found = (config.profiles ?? []).find((p) => p.id === settings.profileId)
+    if (found === undefined) return { problem: `${name}'s provider profile no longer exists. Choose another.` }
+    const profile = withSeatModel(found, settings.model)
     if (profile.wireFormat === 'vscode-lm') return { problem: `${name} runs in its own process and cannot use GitHub Copilot through VS Code. Choose a profile that talks OpenAI, Anthropic or Gemini.` }
     const exe = services.fastFs
     const ops = await fastFsAnswered
@@ -5480,7 +5694,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     return new ObserverAgent({
       exe,
       role,
-      system: role === 'auditor' ? auditorPrompt({ ...context, instructions: settings.prompt }) : guardPrompt({ ...context, instructions: settings.prompt }),
+      system: role === 'auditor' ? auditorPrompt({ ...context, instructions: settings.prompt }) : guardPrompt({ ...context, instructions: settings.prompt, memory: memoryOn(config) }),
       window: capabilities.contextWindow,
       model: {
         wire: profile.wireFormat,
@@ -5529,7 +5743,62 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     startAgent: startObserver,
     // With a decision model (Settings → Agents) and its first pass on: steps it is sure of wait for the next review.
     firstPass: (step, goal) => antiHallucinatorFirstPass(step, goal),
+    // The codebase's memory: points the Anti Hallucinator proposes are kept, and the panel is told.
+    remember: (points, from) => {
+      if (memoryFile === undefined) return
+      void addMemory(memoryFile, points.map((text) => ({ text, from, by: 'anti-hallucinator' as const })))
+        .then(async (added) => {
+          if (added.length === 0) return
+          logger.info(`memory: kept ${String(added.length)} point(s) from the user's guidance`)
+          for (const entry of added) observerHub.event({ kind: 'behind', at: Date.now(), area: 'memory', summary: `Memory: the Anti Hallucinator kept "${entry.text}"` })
+          await postMemory()
+        })
+        .catch((error: unknown) => logger.warn(`memory: could not save - ${error instanceof Error ? error.message : String(error)}`))
+    },
+    memoryUsed: (numbers) => {
+      if (memoryFile === undefined) return
+      const ids = numbers.map((n) => memoryShown[n - 1]?.id).filter((id): id is string => id !== undefined)
+      for (const n of numbers) {
+        const entry = memoryShown[n - 1]
+        if (entry !== undefined) observerHub.event({ kind: 'behind', at: Date.now(), area: 'memory', summary: `Memory: the Anti Hallucinator redirected the agent with "${entry.text}"` })
+      }
+      void noteMemoryUsed(memoryFile, ids).then(() => postMemory()).catch(() => undefined)
+    },
   })
+
+  /**
+   * The models set to take part in a request besides the main one, written on its turnStart record so the Auditor's
+   * report can say who was involved: the decision model, the reranker, the Auditor and the Anti Hallucinator.
+   */
+  function turnParticipants(config: LightCodeConfig): { participants?: Record<string, string> } {
+    const model = (id: string | undefined, seat?: string): string | undefined => {
+      const found = id === undefined ? undefined : (config.profiles ?? []).find((p) => p.id === id)
+      return found === undefined ? undefined : withSeatModel(found, seat).model
+    }
+    const out: Record<string, string> = {}
+    const decision = model(config.decisionModel?.profileId, config.decisionModel?.model)
+    if (decision !== undefined) out['decision model'] = decision
+    const reranker = model(config.reranker?.profileId, config.reranker?.model)
+    if (reranker !== undefined) out['reranker'] = reranker
+    const auditor = config.observers?.auditor?.enabled === true ? model(config.observers.auditor.profileId, config.observers.auditor.model) : undefined
+    if (auditor !== undefined) out['Auditor'] = auditor
+    const guard = config.observers?.antiHallucination?.enabled === true ? model(config.observers.antiHallucination.profileId, config.observers.antiHallucination.model) : undefined
+    if (guard !== undefined) out['Anti Hallucinator'] = guard
+    return Object.keys(out).length > 0 ? { participants: out } : {}
+  }
+
+  /** Settings -> Project -> Memory. */
+  async function postMemory(message?: string): Promise<void> {
+    const config = await loadSettings()
+    post({
+      type: 'codebaseMemory',
+      available: memoryFile !== undefined,
+      enabled: memoryOn(config),
+      guardOn: config.observers?.antiHallucination?.enabled === true,
+      entries: await readMemory(memoryFile),
+      ...(message !== undefined ? { message } : {}),
+    })
+  }
 
   /**
    * The Anti Hallucinator's first pass: asked for as "does it work with anti halucinator too". A Yes/No question to the
@@ -5564,7 +5833,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     observerIndex = await resolveAuditIndex(config)
     const profileOf = (id: string | undefined): unknown => (config.profiles ?? []).find((p) => p.id === id)
     // The prompts too: an edited one takes effect by starting the process afresh with it.
-    const modelKey = JSON.stringify([profileOf(o.auditor?.profileId), profileOf(o.antiHallucination?.profileId), config.tls ?? null, config.certDir ?? null, o.auditor?.prompt ?? '', o.antiHallucination?.prompt ?? ''])
+    const modelKey = JSON.stringify([profileOf(o.auditor?.profileId), profileOf(o.antiHallucination?.profileId), o.auditor?.model ?? '', o.antiHallucination?.model ?? '', config.tls ?? null, config.certDir ?? null, o.auditor?.prompt ?? '', o.antiHallucination?.prompt ?? ''])
     const key = `${JSON.stringify(settings)}|${modelKey}`
     if (key === observerKey) return
     const restart = observerKey !== '' && modelKey !== observerModelKey
@@ -6704,7 +6973,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        */
       await boundedWait(skillsReady, 'Skills')
       // Read every turn, like skills: an edit in another chat or in Fire Code's dialog applies to the next message.
-      const codebaseInstructions = renderCodebaseInstructions(await instructionsReady)
+      // The codebase's memory: given to the agent after its instructions, and to the Anti Hallucinator with the request.
+      // Past its budget, the entries that bear on this request (`selectMemory`) - by the reranker when there is one.
+      const remembered = memoryOn(config) ? await readMemory(memoryFile) : []
+      const memoryRanker = remembered.length > MEMORY_SHOWN_MAX || remembered.reduce((sum, e) => sum + e.text.length + 3, 0) > MEMORY_SHOWN_CHARS ? rerankingFor('docs', 3_000) : undefined
+      const memoryScores = memoryRanker === undefined ? undefined : await memoryRanker.scores(text, remembered.map((entry) => entry.text)).then((result) => (result.ok ? result.scores : undefined))
+      const { shown: memory, left: memoryLeft } = selectMemory(remembered, text, memoryScores)
+      if (memoryLeft > 0) {
+        observerHub.event({ kind: 'behind', at: Date.now(), area: 'memory', summary: `Memory: gave ${String(memory.length)} of ${String(remembered.length)} remembered points, chosen for this request ${memoryScores !== undefined ? 'by the reranker' : 'by shared words'}.` })
+      }
+      memoryShown = memory
+      observerHub.setMemory(memoryOn(config) && memory.length > 0 ? renderMemoryForGuard(memory) : undefined)
+      const codebaseInstructions = [renderCodebaseInstructions(await instructionsReady), renderMemoryForAgent(memory, memoryLeft)].filter((part) => part.length > 0).join('\n\n')
 
       /*
        * Resolved once here and reused for the turn. The mode contributes both tool filtering
@@ -7311,7 +7591,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         const suggestion = await suggestSkillsAndTools(text, turnRegistry).catch(() => '')
         if (suggestion.length > 0) messageText = `${messageText}\n\n${suggestion}`
       }
-      observerHub.event({ kind: 'turnStart', at: Date.now(), text: messageText, mode: activeMode.name, model: profile.model })
+      observerHub.event({ kind: 'turnStart', at: Date.now(), text: messageText, mode: activeMode.name, model: profile.model, ...turnParticipants(config) })
       turnOptions.drainObserverNotes = () => {
         const notes = observerHub.takeNotes()
         return notes.length > 0 ? noteForAgent(notes) : undefined
@@ -7329,7 +7609,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             // Before every request - so just after your message and after each tool result: saved as it goes.
             persistSoon()
           },
-          onCompacted: (summarisedCount) => post({ type: 'compacted', summarisedCount }),
+          onCompacted: (summarisedCount) => {
+            observerHub.event({ kind: 'behind', at: Date.now(), area: 'context', summary: `Conversation compacted: ${String(summarisedCount)} older messages summarised to fit the model's window.` })
+            post({ type: 'compacted', summarisedCount })
+          },
           onUsage: (counted) => recordTokens(profile.model, counted),
           onContextWindowLearned: (tokens) => {
             if (profile.modelCapabilities?.contextWindow !== undefined) return
@@ -7355,6 +7638,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           },
           onRetry: (info) => {
             logger.warn(`model request retry ${String(info.retry)}/${String(info.maxRetries)}: ${info.reason}`)
+            observerHub.event({ kind: 'behind', at: Date.now(), area: 'retry', summary: `Model request retried (${String(info.retry)} of ${String(info.maxRetries)}): ${info.reason}` })
             // The next attempt writes its answer from the start; keeping these would show it twice.
             cumulativeText = ''
             cumulativeReasoning = ''
@@ -8091,8 +8375,35 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * time - a newer one stops the last - cut off at the first line and after eight seconds; any failure is no suggestion,
    * never an error in the chat.
    */
+  /** Why the last suggestion did not appear, or how the last one went - shown under the switch. */
+  let completionProblem: string | undefined
+  let completionOk: { model: string; ms: number } | undefined
+  async function postCompletionSettings(): Promise<void> {
+    const config = await loadSettings()
+    let chatModel: string | undefined
+    let chatProfileId: string | undefined
+    try {
+      const active = resolveActiveProfile(config)
+      chatModel = active.model
+      chatProfileId = active.id
+    } catch {
+      chatModel = undefined
+    }
+    post({
+      type: 'completionSettings',
+      ...(config.composerCompletionProfileId !== undefined ? { profileId: config.composerCompletionProfileId } : {}),
+      ...(chatModel !== undefined ? { chatModel } : {}),
+      ...(chatProfileId !== undefined ? { chatProfileId } : {}),
+      ...(config.composerCompletionModel !== undefined ? { model: config.composerCompletionModel } : {}),
+      profiles: (config.profiles ?? []).map((p) => ({ id: p.id, label: p.label, model: p.model })),
+      ...(completionProblem !== undefined ? { lastProblem: completionProblem } : {}),
+      ...(completionOk !== undefined ? { lastOk: completionOk } : {}),
+    })
+  }
+
   async function suggestCompletion(id: string, typed: string): Promise<void> {
-    completionAbort?.abort()
+    // A newer request replaces this one: said as the reason, so it is not mistaken for the time limit.
+    completionAbort?.abort('superseded')
     const controller = new AbortController()
     completionAbort = controller
     const answer = (text: string): void => {
@@ -8100,24 +8411,57 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       post({ type: 'completion', id, text })
     }
     if (!cachedComposerCompletion || typed.trim().length < TYPE_AHEAD_MIN_CHARS || typed.length > 4000) return answer('')
-    const timer = setTimeout(() => controller.abort(), 8_000)
+    const timer = setTimeout(() => controller.abort('timeout'), 12_000)
+    const started = Date.now()
+    let asking = ''
     let reply = ''
     try {
       const config = await loadSettings()
-      const profile = resolveActiveProfile(config)
-      const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger, services.languageModels)
+      // A profile chosen for suggestions (a small, fast model), else the chat's own.
+      const chosen = config.composerCompletionProfileId === undefined ? undefined : (config.profiles ?? []).find((p) => p.id === config.composerCompletionProfileId)
+      const profile = withSeatModel(chosen ?? resolveActiveProfile(config), config.composerCompletionModel)
+      asking = profile.model
+      /*
+       * Thinking off (reported: "type suggestions doesn't seem to work", with Qwen3 and then Gemini). Both think before they answer
+       * unless told not to, and spent the whole time limit thinking, so no suggestion ever arrived. For this one short
+       * request, thinking is switched off in the profile's own way (Qwen's enable_thinking when the model is Qwen or the
+       * profile already says so) - and if the gateway refuses that, asked again exactly as the profile is.
+       */
+      const style = profile.thinking?.style ?? (/qwen/i.test(profile.model) ? 'qwen' : undefined)
+      // Gemini 2.5 and later think by default too (reported again with a Gemini model): thinkingBudget 0 there.
+      const quick = { ...profile, ...(style !== undefined || profile.thinking !== undefined || profile.wireFormat === 'gemini' ? { thinking: { level: 'off' as const, ...(style !== undefined ? { style } : {}) } } : {}) }
       const messages = typeAheadMessages(redact(typed, cachedSecretValues), conversation.toArray())
-      for await (const chunk of provider.streamChat(messages, { signal: controller.signal })) {
-        if (chunk.type === 'text') reply += chunk.text
-        if (chunk.type === 'error') break
-        // One line is all that is shown; the rest is not worth waiting for.
-        if (reply.trimStart().includes('\n') || reply.length > 400) {
-          controller.abort()
-          break
+      const ask = async (asked: typeof profile): Promise<string | undefined> => {
+        const provider = createChatProvider(asked, httpClient, authStrategyFor(config, asked), logger, services.languageModels)
+        for await (const chunk of provider.streamChat(messages, { signal: controller.signal })) {
+          if (chunk.type === 'text') reply += chunk.text
+          if (chunk.type === 'error') return chunk.error
+          // One line is all that is shown; the rest is not worth waiting for.
+          if (reply.trimStart().includes('\n') || reply.length > 400) {
+            controller.abort()
+            break
+          }
         }
+        return undefined
       }
-    } catch {
+      let failed = await ask(quick)
+      if (failed !== undefined && reply.length === 0 && quick !== profile && !controller.signal.aborted) failed = await ask(profile)
+      if (controller.signal.reason === 'superseded') return
+      if (controller.signal.reason === 'timeout') {
+        completionProblem = `${asking} did not start answering within 12 seconds - too slow for suggestions. Choose a small, fast model for them below.`
+      } else if (failed !== undefined) {
+        // The whole of it (a gateway's reason is usually in the last part), and for a 404 what it usually means.
+        completionProblem = `${asking} answered with an error: ${failed.slice(0, 600)}${/HTTP 404/.test(failed) ? ` - this model name is not available to this provider or key; pick one from the list under "Its model".` : ''}`
+      } else if (reply.trim().length > 0) {
+        completionProblem = undefined
+        completionOk = { model: asking, ms: Date.now() - started }
+      }
+      if (completionProblem !== undefined && (failed !== undefined || controller.signal.reason === 'timeout')) logger.info(`suggestion while typing: ${completionProblem}`)
+    } catch (error) {
       // Stopped by a newer request, the time limit or the gateway: no suggestion.
+      if (controller.signal.reason === 'timeout') completionProblem = `${asking} did not start answering within 12 seconds - too slow for suggestions. Choose a small, fast model for them below.`
+      else if (!controller.signal.aborted) completionProblem = `${asking}: ${error instanceof Error ? error.message : String(error)}`
+      if (completionProblem !== undefined && controller.signal.reason !== 'superseded') logger.info(`suggestion while typing: ${completionProblem}`)
     } finally {
       clearTimeout(timer)
     }
@@ -8333,6 +8677,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         summary: info.summary,
         ...(agent !== undefined ? { kind: agent.kind } : {}),
         ...(agent?.profileId !== undefined ? { profileId: agent.profileId } : {}),
+        ...(agent?.model !== undefined ? { model: agent.model } : {}),
         label: agent?.label ?? 'Nobody',
         available: agent?.available ?? false,
         ...(agent?.reason !== undefined ? { reason: agent.reason } : {}),
@@ -12914,7 +13259,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             lines.push(`- ${alias}: ${error instanceof Error ? error.message : String(error)}`)
           }
         }
-        const tool = createSearchTeamSkillsTool({ ...options, observer: searchLog })
+        const tool = createSearchTeamSkillsTool({ ...options, observer: searchLog, ...withReranking('teamSkills') })
         const result = await tool.execute({ query }, {} as ToolExecutionContext)
         post({
           type: 'searchProbe',
@@ -12945,6 +13290,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           index,
           connectionLabel: search.store.label,
           observer: searchLog,
+          ...withReranking('codebase'),
         })
         const result = await tool.execute({ query }, {} as ToolExecutionContext)
         post({
@@ -12973,6 +13319,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ? { retrieval: { searcher: search.searcher, embedder, index: docsIndex } }
           : {}),
         observer: searchLog,
+        ...withReranking('docs'),
       })
       const result = await tool.execute({ query }, {} as ToolExecutionContext)
       post({
@@ -15889,13 +16236,32 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * still approved as always. Empty without a decision model, with it switched off, or when nothing stands out.
    */
   const SUGGEST_TIMEOUT_MS = 4_000
+  /** With a reranker, the picks are chosen among this many skills and this many tools. */
+  const PICKS_NARROWED = 10
   async function suggestSkillsAndTools(text: string, registry: ToolRegistry): Promise<string> {
     const picks = chatPicks
     if (cachedDecision?.profileId === undefined || picks === undefined || text.trim().length < 6) return ''
     const asked = withRecentChat(text, conversation.toArray())
-    const usable = skills.filter((skill) => skill.always !== true)
+    let usable = skills.filter((skill) => skill.always !== true)
     const control = new Set(['attempt_completion', 'ask_followup_question', 'call_tool', 'search_docs', 'forget_docs', 'read_tool_result', 'ask_user_form', 'light_code_help', 'update_plan', 'plan_progress'])
-    const tools = registry.list().filter((tool) => !control.has(tool.name))
+    let tools = registry.list().filter((tool) => !control.has(tool.name))
+    /*
+     * With a reranker too (asked for: "when both are set up, they should work with each other well"): the reranker
+     * narrows every skill and tool to the most relevant few, and the decision model chooses among those - a choice
+     * between ten options is one it can be sure about, a choice between a hundred and thirty is not. Without the
+     * reranker, or when it does not answer, every option as before.
+     */
+    // Two seconds at most: the picks are made before the reply starts.
+    const narrowing = rerankingFor('picks', 2_000)
+    if (narrowing !== undefined) {
+      const few = { ...narrowing, minScore: 0 }
+      const [skillOrder, toolOrder] = await Promise.all([
+        picks !== 'tools' && usable.length > PICKS_NARROWED ? reorder(few, asked, usable, (skill) => `${skill.name}\n${skill.description}`, PICKS_NARROWED) : undefined,
+        picks !== 'skills' && tools.length > PICKS_NARROWED ? reorder(few, asked, tools, (tool) => `${tool.name}\n${tool.description}`, PICKS_NARROWED) : undefined,
+      ])
+      if (skillOrder?.reranked === true) usable = skillOrder.items.map((entry) => entry.item)
+      if (toolOrder?.reranked === true) tools = toolOrder.items.map((entry) => entry.item)
+    }
     const [skillDecision, toolDecision] = await Promise.all([
       // At most four seconds before the reply starts: a suggestion that comes later is not worth the wait.
       picks !== 'tools' && usable.length > 0 ? askDecisionModel('Skill for this request', skillQuestion(asked, usable), (d) => `best ${d.best?.id ?? '?'} ${(d.best?.probability ?? 0).toFixed(2)}`, undefined, SUGGEST_TIMEOUT_MS) : Promise.resolve(undefined),
@@ -15967,7 +16333,31 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     void postStrategies()
   }
 
+  /**
+   * Every specialist consultation, recorded for the Auditor with the role and the model behind it (asked for: "Auditor
+   * should be able to provide a report on what roles models taken place to implement a task"). The one place every
+   * consultation passes through, so a path added later is recorded too.
+   */
   async function consultAgentNow(
+    resolved: ResolvedAgent,
+    request: { question: string; files?: string[] | undefined; signal?: AbortSignal | undefined },
+    readOnly: boolean,
+  ): Promise<{ advice: string; label: string }> {
+    const started = Date.now()
+    const model = resolved.kind === 'cli' ? 'Claude CLI' : (resolved.model ?? ((await loadSettings()).profiles ?? []).find((p) => p.id === resolved.profileId)?.model ?? resolved.label)
+    const record = (ok: boolean): void =>
+      observerHub.event({ kind: 'consultation', at: Date.now(), role: resolved.role, name: resolved.name, model, ms: Date.now() - started, ok, ...(readOnly ? { readOnly: true } : {}) })
+    try {
+      const answer = await consultAgentInner(resolved, request, readOnly)
+      record(true)
+      return answer
+    } catch (error) {
+      record(false)
+      throw error
+    }
+  }
+
+  async function consultAgentInner(
     resolved: ResolvedAgent,
     request: { question: string; files?: string[] | undefined; signal?: AbortSignal | undefined },
     readOnly: boolean,
@@ -16052,10 +16442,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
 
     const { config } = await configManager.load()
-    const profile = config.profiles?.find((candidate) => candidate.id === agent.profileId)
-    if (profile === undefined) {
+    const found = config.profiles?.find((candidate) => candidate.id === agent.profileId)
+    if (found === undefined) {
       throw new Error(`No profile "${agent.profileId ?? ''}" exists any more.`)
     }
+    // The role's own model from that provider, when one was chosen for it.
+    const profile = withSeatModel(found, agent.model)
 
     /*
      * The seat's thinking level, applied over the profile's.
@@ -16997,9 +17389,86 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         await writeWebChatSetup(webChatFile, next)
         await postWebChat('Saved.')
       })()
+    } else if (message.type === 'testWebChat') {
+      reportFailure('testWebChat', testWebChat())
+    } else if (message.type === 'setWebChatChrome') {
+      reportFailure('setWebChatChrome', setWebChatChrome(message.server, message.mode))
+    } else if (message.type === 'fixWebChatServer') {
+      reportFailure('fixWebChatServer', fixWebChatServer(message.server))
     } else if (message.type === 'clearWebChat') {
       stopWebChatCapture()
       if (webChatFile !== undefined) void writeWebChatSetup(webChatFile, undefined).then(() => postWebChat('Removed.'))
+    } else if (message.type === 'requestAuditRolesReport') {
+      reportFailure(
+        'auditRolesReport',
+        readAuditTool.execute({ action: 'roles', source: 'local' }, {} as ToolExecutionContext).then((result) => post({ type: 'auditRolesReport', text: result.content })),
+      )
+    } else if (message.type === 'requestCompletionSettings') {
+      reportFailure('postCompletionSettings', postCompletionSettings())
+    } else if (message.type === 'setCompletionProfile') {
+      const profileId = message.profileId
+      const model = message.model
+      reportFailure(
+        'setCompletionProfile',
+        configManager.save('user', { composerCompletionProfileId: profileId, composerCompletionModel: model } as LightCodeConfig).then(() => postCompletionSettings()),
+      )
+    } else if (message.type === 'requestProfileModels') {
+      const profileId = message.profileId
+      reportFailure(
+        'requestProfileModels',
+        (async () => {
+          const config = await loadSettings()
+          const profile = (config.profiles ?? []).find((candidate) => candidate.id === profileId)
+          if (profile === undefined) {
+            post({ type: 'profileModels', profileId, models: [], warning: 'That profile no longer exists.' })
+            return
+          }
+          // Never fatal: a gateway with no list still lets a model name be typed (§9).
+          const result = await listModelsFor(config, profile).catch((error: unknown) => ({ ids: [] as string[], warning: error instanceof Error ? error.message : String(error) }))
+          post({ type: 'profileModels', profileId, models: result.ids, model: profile.model, ...(result.warning !== undefined ? { warning: result.warning } : {}) })
+        })(),
+      )
+    } else if (message.type === 'requestCodebaseMemory') {
+      reportFailure('postMemory', postMemory())
+    } else if (message.type === 'addCodebaseMemory' || message.type === 'editCodebaseMemory' || message.type === 'deleteCodebaseMemory') {
+      const file = memoryFile
+      if (file === undefined) return
+      const done =
+        message.type === 'addCodebaseMemory'
+          ? addMemory(file, [{ text: message.text, by: 'you' }])
+          : message.type === 'editCodebaseMemory'
+            ? editMemory(file, message.id, message.text)
+            : deleteMemory(file, message.id)
+      reportFailure('changeMemory', Promise.resolve(done).then(() => postMemory()))
+    } else if (message.type === 'setCodebaseMemoryEnabled') {
+      const value = message.value
+      reportFailure(
+        'setCodebaseMemoryEnabled',
+        (async () => {
+          // Through the observers' own save: per project, as the rest of their settings are.
+          const config = await loadSettings()
+          await handleSaveObservers({ ...(config.observers ?? {}), antiHallucination: { ...(config.observers?.antiHallucination ?? {}), memory: value } })
+          await postMemory()
+        })(),
+      )
+    } else if (message.type === 'requestReranker') {
+      reportFailure('postReranker', postReranker())
+    } else if (message.type === 'saveReranker') {
+      const settings = message.settings
+      const endpointProblem = rerankEndpointProblem(settings.endpoint?.trim())
+      if (endpointProblem !== undefined) {
+        void postReranker(endpointProblem)
+        return
+      }
+      void configManager
+        .save('user', { reranker: settings.profileId === undefined ? undefined : settings })
+        .then(async () => {
+          await postSettings()
+          await postReranker(undefined, true)
+        })
+        .catch((error: unknown) => void postReranker(error instanceof Error ? error.message : String(error)))
+    } else if (message.type === 'testReranker') {
+      reportFailure('testReranker', testReranker())
     } else if (message.type === 'requestDecisionModel') {
       reportFailure('postDecisionModel', postDecisionModel())
     } else if (message.type === 'saveDecisionModel') {
@@ -17658,6 +18127,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           roles[role] = {
             kind: assignment.kind,
             ...(assignment.profileId !== undefined ? { profileId: assignment.profileId } : {}),
+            ...(assignment.kind === 'profile' && assignment.model !== undefined && assignment.model.trim() !== '' ? { model: assignment.model.trim() } : {}),
             ...(roles[role]?.prompt !== undefined ? { prompt: roles[role].prompt } : {}),
           }
         }

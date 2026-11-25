@@ -161,8 +161,8 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
   {
     id: 'search',
     label: 'Search and indexing',
-    description: 'Vector stores, the embedder, and the dispatcher settings.',
-    keys: ['vectorStores', 'activeVectorStoreId', 'embedder', 'retrieval'],
+    description: 'Vector stores, the embedder, the reranker, and the dispatcher settings.',
+    keys: ['vectorStores', 'activeVectorStoreId', 'embedder', 'retrieval', 'reranker'],
     /*
      * The names that identify *this person's* collections, and they are the one part of a search
      * setup that must differ across a team.
@@ -304,7 +304,7 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
     id: 'workspace',
     label: 'Workspace behaviour',
     description: 'Mode, step cap, automatic compaction, retries, folders tools may read, and folders hidden from the @ picker.',
-    keys: ['modeId', 'maxIterations', 'autoCompact', 'autoHandoff', 'unlimitedSteps', 'composerCompletion', 'connection', 'filesystem'],
+    keys: ['modeId', 'maxIterations', 'autoCompact', 'autoHandoff', 'unlimitedSteps', 'composerCompletion', 'composerCompletionProfileId', 'composerCompletionModel', 'connection', 'filesystem'],
     machineSpecific: true,
   },
   {

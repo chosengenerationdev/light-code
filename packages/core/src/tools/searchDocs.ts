@@ -13,6 +13,7 @@ import { parseDocEntryId, schemaForTool, type DocEntryKind } from '../rag/toolDo
 import type { SearchObserver } from '../rag/searchLog.js'
 import type { VectorSearcher } from '../rag/vectorStore.js'
 import type { Skill } from '../skills/index.js'
+import { reorder, type Reranking } from '../rerank/rerank.js'
 import type { Tool, ToolResult } from './types.js'
 
 /**
@@ -96,13 +97,22 @@ export interface SearchDocsOptions {
   currentProject?: () => readonly string[]
   /** The default chosen in Settings -> Project, for a request that names no project or author. */
   defaultScope?: () => DefaultSearchScope
+  /**
+   * A reranker (rerank/rerank.ts). With an index it reorders the index's candidates; without one it ranks every tool
+   * and skill on its name and description, in place of the plain word match.
+   */
+  reranking?: Reranking
 }
 
 const DEFAULT_LIMIT = 5
+/** Without an index, at most this many tools and skills are given to the reranker. */
+const RERANK_ALL_LIMIT = 400
 
 interface Candidate {
   kind: DocEntryKind
   name: string
+  /** The reranker's score, when one put this in order. */
+  relevance?: number
 }
 
 /**
@@ -173,7 +183,7 @@ export function createSearchDocsTool(options: SearchDocsOptions): Tool<SearchDoc
     async execute(params): Promise<ToolResult> {
       const startedAt = Date.now()
       try {
-        const { matches, via, note, hidden, scope } = await runDocsSearch(options, params)
+        const { matches, via, note, hidden, scope, reranked } = await runDocsSearch(options, params)
         const leftOut = describeHidden(hidden, scope)
 
         options.observer?.record({
@@ -208,7 +218,8 @@ export function createSearchDocsTool(options: SearchDocsOptions): Tool<SearchDoc
             leftOut,
             // Stated because the two paths rank very differently, and a lexical result that
             // looks like a semantic one hides the fact that the index is not being used.
-            via === 'lexical' ? '(Matched on names and descriptions, not by meaning.)' : '',
+            via === 'lexical' && reranked !== true ? '(Matched on names and descriptions, not by meaning.)' : '',
+            via === 'lexical' && reranked === true ? '(Ranked by the reranker on names and descriptions; there is no index.)' : '',
             '',
             renderDocsMatches(options, matches),
           ]
@@ -241,7 +252,7 @@ export async function runDocsSearch(
   options: SearchDocsOptions,
   params: SearchDocsParams,
   signal?: AbortSignal,
-): Promise<{ matches: Candidate[]; via: 'index' | 'lexical'; note?: string; hidden: number; scope: SearchScope }> {
+): Promise<{ matches: Candidate[]; via: 'index' | 'lexical'; note?: string; hidden: number; scope: SearchScope; reranked?: boolean }> {
   const limit = params.limit ?? DEFAULT_LIMIT
   const tools = options.listTools()
   const skills = options.listSkills?.() ?? []
@@ -262,6 +273,26 @@ export async function runDocsSearch(
     return tool === undefined || inSearchScope(tool, scope, tool.name.startsWith('py__'))
   }
   const filtering = scope.projects !== undefined || scope.author !== undefined
+  /*
+   * What the reranker reads for each candidate: what a model would read to decide whether it fits - the name, the
+   * description, and for a tool its parameter names.
+   */
+  const docText = (candidate: Candidate): string => {
+    if (candidate.kind === 'skill') {
+      const skill = skills.find((entry) => entry.name === candidate.name)
+      return `${candidate.name}\n${skill?.description ?? ''}`
+    }
+    const tool = tools.find((entry) => entry.name === candidate.name)
+    let properties: Record<string, unknown> | undefined
+    try {
+      properties = tool === undefined ? undefined : (schemaForTool(tool) as { properties?: Record<string, unknown> } | undefined)?.properties
+    } catch {
+      properties = undefined
+    }
+    const parameters = properties !== undefined ? Object.keys(properties).join(', ') : ''
+    return `${candidate.name}\n${tool?.description ?? ''}${parameters.length > 0 ? `\nParameters: ${parameters}` : ''}`
+  }
+  const wantedCount = options.reranking !== undefined ? Math.max(limit, options.reranking.candidates) : limit
 
   if (options.retrieval !== undefined) {
     try {
@@ -269,7 +300,7 @@ export async function runDocsSearch(
       const hits = await options.retrieval.searcher.searchByVector(options.retrieval.index, vector, {
         // Over-fetch: hits for tools that have since disappeared, or from another project, are
         // dropped below, and asking for exactly `limit` would quietly return fewer than requested.
-        size: Math.max(limit * (filtering ? 8 : 3), 10),
+        size: Math.max(wantedCount * (filtering ? 8 : 3), 10),
         ...(signal !== undefined ? { signal } : {}),
       })
 
@@ -291,10 +322,21 @@ export async function runDocsSearch(
           continue
         }
         matches.push(parsed)
-        if (matches.length >= limit) break
+        if (matches.length >= wantedCount) break
       }
 
-      if (matches.length > 0) return { matches, via: 'index', hidden, scope }
+      if (matches.length > 0 && options.reranking !== undefined) {
+        const ordered = await reorder(options.reranking, params.query, matches, docText, limit, signal)
+        return {
+          matches: ordered.items.map((entry) => (entry.score !== undefined ? { ...entry.item, relevance: entry.score } : entry.item)),
+          via: 'index',
+          hidden,
+          scope,
+          reranked: ordered.reranked,
+          ...(ordered.note !== undefined ? { note: ordered.note } : ordered.dropped > 0 ? { note: `The reranker set aside ${String(ordered.dropped)} weak match(es).` } : {}),
+        }
+      }
+      if (matches.length > 0) return { matches: matches.slice(0, limit), via: 'index', hidden, scope }
       // An empty index is indistinguishable from a genuinely unmatched query, and the
       // lexical pass is cheap, so fall through rather than reporting nothing.
     } catch (error) {
@@ -308,6 +350,27 @@ export async function runDocsSearch(
   }
 
   hidden = 0
+  /*
+   * No index (or nothing in it): with a reranker, every tool and skill in scope is ranked on its name and description
+   * - far better than matching words. When it does not answer, the word match as before.
+   */
+  if (options.reranking !== undefined) {
+    const all: Candidate[] = []
+    if (wanted('tool')) for (const tool of tools) all.push({ kind: 'tool', name: tool.name })
+    if (wanted('skill')) for (const skill of skills) all.push({ kind: 'skill', name: skill.name })
+    const inside = all.filter((candidate) => inScope(candidate))
+    const ordered = await reorder(options.reranking, params.query, inside.slice(0, RERANK_ALL_LIMIT), docText, limit, signal)
+    if (ordered.reranked) {
+      return {
+        matches: ordered.items.map((entry) => ({ ...entry.item, ...(entry.score !== undefined ? { relevance: entry.score } : {}) })),
+        via: 'lexical',
+        hidden: all.length - inside.length,
+        scope,
+        reranked: true,
+      }
+    }
+    return { ...lexicalResult(), hidden, scope, ...(ordered.note !== undefined ? { note: ordered.note } : {}) }
+  }
   return { ...lexicalResult(), hidden, scope }
 
   function lexicalResult(): { matches: Candidate[]; via: 'lexical' } {
@@ -339,11 +402,18 @@ export function renderDocsMatches(options: SearchDocsOptions, matches: readonly 
       if (match.kind === 'tool') {
         const tool = tools.get(match.name)
         if (tool === undefined) return undefined
-        return renderTool(tool, options.accessibleTo?.(tool.name) ?? true)
+        return withRelevance(renderTool(tool, options.accessibleTo?.(tool.name) ?? true), match.relevance)
       }
       const skill = skills.get(match.name)
-      return skill !== undefined ? renderSkill(skill) : undefined
+      return skill !== undefined ? withRelevance(renderSkill(skill), match.relevance) : undefined
     })
     .filter((rendered): rendered is string => rendered !== undefined)
     .join('\n\n')
+}
+
+/** A match's heading with the reranker's score after it, when it has one. */
+function withRelevance(rendered: string, relevance: number | undefined): string {
+  if (relevance === undefined) return rendered
+  const end = rendered.indexOf('\n')
+  return end < 0 ? `${rendered}  (relevance ${relevance.toFixed(3)})` : `${rendered.slice(0, end)}  (relevance ${relevance.toFixed(3)})${rendered.slice(end)}`
 }

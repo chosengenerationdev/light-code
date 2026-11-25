@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { HostModelProvider, listHostModels, testHostModels, type HostLanguageModels } from '../../providers/hostModels.js'
 import type { StreamChunk } from '../../providers/types.js'
-import { createRelayDebugReader, createRelayLanguageModels, NO_VSCODE_DEBUG, NO_VSCODE_WINDOW, startLmRelay } from './lmRelay.js'
+import { createRelayDebugEvaluator, createRelayDebugReader, createRelayLanguageModels, NO_VSCODE_DEBUG, NO_VSCODE_WINDOW, startLmRelay } from './lmRelay.js'
 
 /**
  * GitHub Copilot from Fire Code and the Node host, through a VS Code window. Driven over a real pipe:
@@ -174,5 +174,48 @@ describe('a VS Code debug session, from Fire Code', () => {
     disposers.push(() => relay.dispose())
     await waitForFile(dir)
     expect(await createRelayDebugReader({ dir })()).toBeUndefined()
+  })
+})
+
+// Asked for: "while debug sessions provide way to read dataframe data too or complex python objects".
+describe('reading inside a paused program, from Fire Code', () => {
+  const paused = { sessionName: 'Python: app.py', sessionType: 'python', stopped: { reason: 'breakpoint', frames: [] }, recentOutput: [] }
+  const running = { sessionName: 'Node: server', sessionType: 'node', recentOutput: [] }
+
+  it('passes what to open up to the window', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'lm-relay-'))
+    const asked: unknown[] = []
+    const relay = startLmRelay(undefined, { dir, debug: async (request) => (asked.push(request), paused as never) })
+    disposers.push(() => relay.dispose())
+    await waitForFile(dir)
+    await createRelayDebugReader({ dir })({ expand: 'df', frame: 1 })
+    expect(asked).toContainEqual({ expand: 'df', frame: 1 })
+  })
+
+  it('evaluates in the paused window only - never twice', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'lm-relay-'))
+    const evaluated: string[] = []
+    for (const [name, session] of [['running', running], ['paused', paused]] as const) {
+      const relay = startLmRelay(undefined, {
+        dir,
+        debug: async () => session as never,
+        evaluate: async (request) => (evaluated.push(`${name}: ${request.expression}`), { ok: true, result: '   a  b\n0  1  2', type: 'str' }),
+      })
+      disposers.push(() => relay.dispose())
+    }
+    for (let i = 0; i < 100 && readdirSync(dir).length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 10))
+    const answer = await createRelayDebugEvaluator({ dir })({ expression: 'df.head().to_string()' })
+    expect(answer).toMatchObject({ ok: true, result: '   a  b\n0  1  2' })
+    expect(evaluated).toEqual(['paused: df.head().to_string()'])
+  })
+
+  it('evaluates nothing when no window is paused', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'lm-relay-'))
+    const evaluated: string[] = []
+    const relay = startLmRelay(undefined, { dir, debug: async () => running as never, evaluate: async (request) => (evaluated.push(request.expression), { ok: true }) })
+    disposers.push(() => relay.dispose())
+    await waitForFile(dir)
+    expect(await createRelayDebugEvaluator({ dir })({ expression: 'x' })).toBeUndefined()
+    expect(evaluated).toEqual([])
   })
 })

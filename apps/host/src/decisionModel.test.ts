@@ -67,6 +67,22 @@ async function standIn(d3: { p: number; api?: 'systemone' | 'chat' } | 'no-proba
         response.end(JSON.stringify({ object: 'structured_decision', model: body.model, answers: { q: answer }, usage: { input_tokens: 100, output_tokens: 0 } }))
         return
       }
+      // A reranker in TEI's shape, scoring by shared words: for the reranker-and-decision-model test.
+      if (request.url === '/rerank') {
+        const body = JSON.parse(raw) as { query?: string; texts?: string[] }
+        if (!Array.isArray(body.texts)) {
+          response.writeHead(422).end()
+          return
+        }
+        const query = new Set(String(body.query).toLowerCase().match(/[a-z]{3,}/g) ?? [])
+        const scores = body.texts.map((t, index) => {
+          const shared = (t.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter((w) => query.has(w)).length
+          return { index, score: shared / (shared + 2) }
+        })
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify(scores))
+        return
+      }
       // The host also asks /models for the context window: nothing to say there.
       if (request.url?.endsWith('/chat/completions') !== true) {
         response.writeHead(404).end()
@@ -266,6 +282,32 @@ describe('the decision model in Agent team mode', () => {
     await second.until((m) => m.type === 'done')
     expect(off.systemOne).toHaveLength(0)
     expect(lastUser(off.main[0])).toBe('Show me the files in this folder.')
+  })
+
+  // Asked for: "when both are setup, they should work with each other well too". The reranker narrows every tool to the
+  // ten most relevant, and the decision model chooses among those - a choice it can be sure about.
+  it('with a reranker too, chooses among the ten tools the reranker put first', async () => {
+    const { baseUrl, systemOne } = await standIn({ p: 0.9 })
+    const { post, until } = await host(baseUrl, {
+      modeId: 'auto',
+      decisionModel: { profileId: 'd3' },
+      profiles: [
+        { id: 'main', label: 'Main', wireFormat: 'openai', baseUrl, model: 'main', auth: { type: 'none' } },
+        { id: 'spec', label: 'Specialist', wireFormat: 'openai', baseUrl, model: 'spec', auth: { type: 'none' } },
+        { id: 'd3', label: 'D3', wireFormat: 'openai', baseUrl, model: 'd3', auth: { type: 'none' } },
+        { id: 'bge', label: 'BGE', wireFormat: 'openai', baseUrl, model: 'bge-reranker-v2-m3', auth: { type: 'none' } },
+      ],
+      reranker: { profileId: 'bge' },
+    })
+    await post({ type: 'setChatSkillToolPicks', value: 'tools' })
+    await until((m) => m.type === 'chatSkillToolPicks' && m['value'] === 'tools')
+    await post({ type: 'sendMessage', text: 'Search the files in this folder for a regular expression.' })
+    await until((m) => m.type === 'done')
+    const asked = systemOne.find((body) => body.questions.q.instructions.startsWith('Which tool'))
+    const options = Object.values(asked?.questions.q.criteria ?? {})
+    // Ten tools and "nothing in particular".
+    expect(options).toHaveLength(11)
+    expect(options.some((option) => option.startsWith('search_files'))).toBe(true)
   })
 
   it('Test decision model shows what was read from each answer', async () => {

@@ -1,4 +1,5 @@
-import type { AgentRoleState } from '@light-code/core/browser'
+import type { AgentRoleState, Transport } from '@light-code/core/browser'
+import { SeatModelPicker } from './SeatModelPicker.js'
 import { useEffect, useState, type ReactElement } from 'react'
 
 import { Select } from '../Select.js'
@@ -35,8 +36,10 @@ export interface AgentsTabProps {
   colors: Record<string, string>
   onAssign: (
     role: string,
-    assignment: { kind: 'cli' | 'profile'; profileId?: string } | undefined,
+    assignment: { kind: 'cli' | 'profile'; profileId?: string; model?: string } | undefined,
   ) => void
+  /** For each role's model picker (SeatModelPicker); absent where the tab is rendered without a host. */
+  transport?: Transport
   onSetPrompt: (role: string, prompt: string | undefined) => void
   onSetBudget: (matters: boolean) => void
   onSetTeamGuidance: (guidance: string | undefined) => void
@@ -321,6 +324,15 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
                 }
                 options={optionsFor()}
               />
+              {props.transport !== undefined && role.kind === 'profile' && role.profileId !== undefined ? (
+                <SeatModelPicker
+                  transport={props.transport}
+                  profileId={role.profileId}
+                  value={role.model}
+                  onChange={(model) => props.onAssign(role.role, { kind: 'profile', ...(role.profileId !== undefined ? { profileId: role.profileId } : {}), ...(model !== undefined ? { model } : {}) })}
+                  label="Its model"
+                />
+              ) : null}
             </div>
           </div>
 

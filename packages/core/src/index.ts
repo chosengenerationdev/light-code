@@ -189,7 +189,7 @@ export {
 } from './providers/hostModels.js'
 export { toPortableParameters } from './providers/schema.js'
 export { openWithDefaultApp, revealInFolder } from './platform/node/openWith.js'
-export { createRelayDebugReader, createRelayLanguageModels, defaultRelayDir, NO_VSCODE_DEBUG, NO_VSCODE_WINDOW, startLmRelay } from './platform/node/lmRelay.js'
+export { createRelayDebugEvaluator, createRelayDebugReader, createRelayLanguageModels, defaultRelayDir, NO_VSCODE_DEBUG, NO_VSCODE_WINDOW, startLmRelay } from './platform/node/lmRelay.js'
 export {
   toOpenAITools,
   toAnthropicTools,
@@ -338,7 +338,10 @@ export {
 export { createExcelDiagnoseTool } from './tools/office.js'
 export {
   createReadDebugSessionTool,
+  createEvaluateInDebugSessionTool,
   renderDebugSnapshot,
+  type DebugEvaluation,
+  type DebugReadRequest,
   type DebugSessionSnapshot,
   type DebugSessionToolOptions,
   type DebugStackFrame,

@@ -1,9 +1,10 @@
 import path from 'node:path'
 import { z } from 'zod'
 import { aliasForScope } from '../rag/aliases.js'
-import type { Embedder } from '../rag/embedder.js'
+import { searchFailure, type Embedder } from '../rag/embedder.js'
 import type { SearchObserver } from '../rag/searchLog.js'
 import type { VectorSearcher } from '../rag/vectorStore.js'
+import { reorder, type Reranking } from '../rerank/rerank.js'
 import type { Tool, ToolExecutionContext, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
@@ -62,6 +63,8 @@ export interface SearchCodebaseOptions {
   teamAliases?: readonly string[]
   /** Who this machine is, so "mine" stays "mine" even when the index is shared. */
   owner?: string
+  /** A reranker (rerank/rerank.ts): more candidates are fetched, and it puts the most relevant first. */
+  reranking?: Reranking
 }
 
 const DEFAULT_SIZE = 8
@@ -190,8 +193,8 @@ export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<S
         const vector = await options.embedder.embed(params.query)
 
         // The request shape is the backend's business, not this tool's — see `VectorSearcher`.
-        const hits = await options.searcher.searchByVector(collection, vector, {
-          size,
+        const fetched = await options.searcher.searchByVector(collection, vector, {
+          size: options.reranking !== undefined ? Math.max(size, options.reranking.candidates) : size,
           ...(params.pathPrefix !== undefined && params.pathPrefix.trim().length > 0
             ? { pathPrefix: params.pathPrefix.trim() }
             : {}),
@@ -203,6 +206,20 @@ export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<S
            */
           ...(!searchingTeam && options.owner !== undefined ? { owner: options.owner } : {}),
         })
+
+        /*
+         * With a reranker, the nearest neighbours are only candidates: it reads each chunk with the query and puts the
+         * most relevant first, dropping what scores too low. Without one, or when it fails, the index's own order.
+         */
+        let rerankNote: string | undefined
+        let relevance: (number | undefined)[] = []
+        let hits = fetched.slice(0, size)
+        if (options.reranking !== undefined && fetched.length > 0) {
+          const ordered = await reorder(options.reranking, params.query, fetched, (hit) => `${hit.path}\n${hit.text}`, size)
+          hits = ordered.items.map((entry) => entry.item)
+          relevance = ordered.items.map((entry) => entry.score)
+          rerankNote = ordered.note ?? (ordered.dropped > 0 ? `The reranker set aside ${String(ordered.dropped)} weak match(es).` : undefined)
+        }
 
         options.observer?.record({
           at: startedAt,
@@ -243,7 +260,8 @@ export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<S
             const attribution = describeOrigin(hit.owner, hit.project, options.owner)
             // Only when it is *known* absent. Unknown says nothing — see `isPresentHere`.
             const marker = local[position] === false ? '  — NOT IN THIS WORKSPACE' : ''
-            return `[${position + 1}] ${where}  (score ${hit.score.toFixed(3)})${attribution}${marker}\n${hit.text}`
+            const score = relevance[position] !== undefined ? `relevance ${(relevance[position] ?? 0).toFixed(3)}` : `score ${hit.score.toFixed(3)}`
+            return `[${position + 1}] ${where}  (${score})${attribution}${marker}\n${hit.text}`
           })
           .join('\n\n---\n\n')
 
@@ -256,6 +274,7 @@ export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<S
             // Said every time, because the failure mode is the model treating a weak
             // semantic hit as authoritative and never opening the file.
             'These are approximate. Read the files before relying on them, and use search_files if you know the exact term.',
+            ...(rerankNote !== undefined ? [rerankNote] : []),
             ...(teamUnavailable
               ? [
                   '',
@@ -291,7 +310,7 @@ export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<S
           elapsedMs: Date.now() - startedAt,
           error: message,
         })
-        return { content: message, isError: true }
+        return { content: searchFailure(message, 'find the code with search_files (exact text) and list_files, and read it with read_file.'), isError: true }
       }
     },
   }

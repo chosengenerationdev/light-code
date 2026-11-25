@@ -1,4 +1,4 @@
-import { isPackageRunnerCommand, type McpServerConfig } from '../mcp/types.js'
+import { isPackageRunnerCommand, stdioCommandLine, type McpServerConfig } from '../mcp/types.js'
 
 /**
  * The rules that keep a web-chat consultation inside the organisation - asked for: "it shouldnt go outside [the organisation] at any stage,
@@ -49,13 +49,12 @@ export function chromeServerProblems(config: McpServerConfig | undefined): strin
   if (typeof record.url === 'string' || typeof record.command !== 'string') return ['The Chrome DevTools MCP server must run on this PC (a command), not as a remote server at a URL.']
   const problems: string[] = []
   /*
-   * The command line as the shell will see it - reported: the flags were "already included" and still reported missing.
-   * The MCP form keeps one argument per line, so arguments typed on one line (or the whole line typed as the command)
-   * arrive as one string, which Windows re-splits when it starts the server. Read the same way here.
+   * The program and arguments exactly as the server is started with them (`stdioCommandLine`, the same function the MCP
+   * client uses): several options on one line are split there, so they are read split here. Before, the check and the
+   * launch disagreed both ways round - once the check read a line as several flags the server then ignored, once it
+   * refused a line the person had typed as they meant it.
    */
-  const words = commandWords([record.command, ...(record.args ?? [])].join(' '))
-  const command = words[0] ?? record.command
-  const args = words.slice(1)
+  const { command, args } = stdioCommandLine({ command: record.command, args: record.args ?? [] })
   const runner = command.split(/[\\/]/).pop()?.toLowerCase() ?? ''
   if (runner === 'npx' || runner === 'npx.cmd') {
     const spec = npxPackage(args)
@@ -81,11 +80,65 @@ export function chromeServerProblems(config: McpServerConfig | undefined): strin
   return problems
 }
 
-/** A command line split into words the way a shell does: on spaces, keeping "quoted parts" together. */
-export function commandWords(line: string): string[] {
-  const words: string[] = []
-  for (const match of line.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) words.push(match[1] ?? match[2] ?? match[3] ?? '')
-  return words
+
+/** The version of chrome-devtools-mcp the web chat was tested against end to end; used when a fix must pin one. */
+export const TESTED_CHROME_MCP = 'chrome-devtools-mcp@1.13.0'
+
+/**
+ * The server entry with what the web chat needs added, for the panel's "Fix it for me": options typed on one line split
+ * one per line, the reporting-off flags added, `--autoConnect` added when it attaches to no Chrome (so it uses the
+ * person's own, signed-in Chrome rather than starting another), and an unpinned npx package pinned to the tested
+ * version. Undefined when it cannot be fixed this way (a remote server, another package runner, a Chrome elsewhere).
+ */
+export function fixChromeServer(config: McpServerConfig | undefined): McpServerConfig | undefined {
+  if (config === undefined) return undefined
+  const record = config as { command?: string; args?: string[]; url?: string }
+  if (typeof record.url === 'string' || typeof record.command !== 'string') return undefined
+  const line = stdioCommandLine({ command: record.command, args: record.args ?? [] })
+  const args = [...line.args]
+  const runner = line.command.split(/[\\/]/).pop()?.toLowerCase() ?? ''
+  if (runner === 'npx' || runner === 'npx.cmd') {
+    const spec = npxPackage(args)
+    if (spec === undefined) return undefined
+    if (!isPinned(spec)) {
+      if (!/^chrome-devtools-mcp(@[^@]*)?$/.test(spec)) return undefined
+      args[args.indexOf(spec)] = TESTED_CHROME_MCP
+    }
+    if (!args.includes('-y') && !args.includes('--yes')) args.unshift('-y')
+  } else if (isPackageRunnerCommand(line.command)) {
+    return undefined
+  }
+  // Which Chrome it uses is left as it was: that is the person's choice ("Which Chrome", `withChromeMode`), and
+  // --autoConnect only works once remote debugging is switched on in their Chrome.
+  for (const flag of REQUIRED_CHROME_FLAGS) if (!args.includes(flag)) args.push(flag)
+  const fixed = { ...(config as object), command: line.command, args } as McpServerConfig
+  return chromeServerProblems(fixed).length === 0 ? fixed : undefined
+}
+
+const AUTO_CONNECT = /^--?(autoConnect|auto-connect)(=true)?$/
+const NAMES_CHROME = /^--?(browserUrl|browser-url|u|wsEndpoint|ws-endpoint|w)(=|$)/
+
+/**
+ * Which Chrome the server uses: `own` - the person's own Chrome (`--autoConnect`; Chrome 144+, with remote debugging
+ * switched on at chrome://inspect/#remote-debugging); `started` - a Chrome the server opens itself, on a profile of its
+ * own that keeps the sign-in (only one copy of the server at a time); `address` - a Chrome named by address.
+ */
+export function chromeMode(config: McpServerConfig | undefined): 'own' | 'started' | 'address' | undefined {
+  const record = config as { command?: string; args?: string[] } | undefined
+  if (record === undefined || typeof record.command !== 'string') return undefined
+  const { args } = stdioCommandLine({ command: record.command, args: record.args ?? [] })
+  if (args.some((arg) => NAMES_CHROME.test(arg))) return 'address'
+  return args.some((arg) => AUTO_CONNECT.test(arg)) ? 'own' : 'started'
+}
+
+/** The entry set to use the person's own Chrome or one it starts (`chromeMode`); arguments split one per line. */
+export function withChromeMode(config: McpServerConfig, mode: 'own' | 'started'): McpServerConfig | undefined {
+  const record = config as { command?: string; args?: string[] }
+  if (typeof record.command !== 'string' || chromeMode(config) === 'address') return undefined
+  const line = stdioCommandLine({ command: record.command, args: record.args ?? [] })
+  const args = line.args.filter((arg) => !AUTO_CONNECT.test(arg))
+  if (mode === 'own') args.push('--autoConnect')
+  return { ...(config as object), command: line.command, args } as McpServerConfig
 }
 
 function isLoopback(host: string): boolean {

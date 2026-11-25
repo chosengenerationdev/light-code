@@ -14,7 +14,7 @@ import {
   type TestConnectionStep,
   type WireFormat,
 } from '@light-code/core/browser'
-import { useState, type ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import { Select } from '../Select.js'
 import {
   colors,
@@ -214,6 +214,17 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
     setLastFetchedUrl(fetchKey)
     props.onRequestModels(currentInput())
   }
+
+  /*
+   * The list is loaded by itself - when the form opens on a profile that already has an address and a credential, when
+   * a preset fills the address in, and after the address or key is changed and left alone for a moment - so the
+   * dropdown is there without a Refresh (asked for: "why cant we directly show the drop down"). Refresh stays, for a
+   * gateway whose list changed.
+   */
+  useEffect(() => {
+    const timer = setTimeout(maybeAutoFetchModels, 700)
+    return () => clearTimeout(timer)
+  }, [baseUrl, apiKey, authType, wireFormat])
 
   const submit = (): void => {
     const fieldErrors = validateProviderForm({ label, wireFormat, baseUrl, model })

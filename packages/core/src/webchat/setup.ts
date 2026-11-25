@@ -46,6 +46,8 @@ export interface WebChatSetup {
     body: string
     /** How the question is written into the body. */
     encoding: 'json' | 'form' | 'raw'
+    /** Whether the page's own request carried cookies - copied, since a cross-site API accepts only its page's way. */
+    credentials?: 'include' | 'same-origin' | 'omit' | undefined
   }
   response: WebChatResponseSpec
   /**
@@ -54,6 +56,16 @@ export interface WebChatSetup {
    * withheld from the assistant; any other Chrome server is left as it was.
    */
   server?: string | undefined
+  /**
+   * How a question gets there. `replay` (the default): Light Code sends the captured request itself, from inside the page,
+   * to the approved backend on the page's own site. `window`: Light Code types the question into the chat window and
+   * sends it, as a person would, and reads the answer from the page's own reply to the approved backend - for a chat whose
+   * backend is on another site (reported: "POST <url> on another site than the web chat ... so it is not used"), where
+   * Light Code never calls that backend itself.
+   */
+  method?: 'replay' | 'window' | undefined
+  /** The approved backend address, whole (site and path): the only one a reply is taken from. */
+  backendUrl?: string | undefined
   /** The model the captured request named, for showing; `modelOverride` replaces it in a JSON body. */
   model?: string
   modelOverride?: string

@@ -72,8 +72,10 @@ install contacts nothing until a provider is configured.
 MCP, Add-ons, Search, Agents, Schedules, Python, Tools, DevOps, Outlook, Custom data, Skills, Usage, Network and
 Appearance - plus **Team reviews** for team admins and owners with a change to decide, an add-on's own tab while it
 is enabled, and Review and Variables on a shared server (\`light-code --server\`) only. **Project** also holds Team
-admins, the Auditor and the Anti Hallucinator. Beside the mode picker (Auto, Ask, Agent team) is **Strategy**,
-once a specialist is assigned.
+admins, the Auditor (with **Report on this chat**: which roles and models took part), the Anti Hallucinator and the
+codebase's **Memory**. **Agents** holds the **Decision model** (D3) and the **Web chat**; **Search** holds the
+**Reranker**. Beside the mode picker (Auto, Ask, Agent team) is **Strategy**, once a specialist is assigned, and
+**Picks** (skill and tool for each request), once a decision model is set up.
 
 **Everything the panel writes goes into one JSON file**, and that file can be hand-edited — the UI
 and the loader share one schema, so a bad hand-edit and a bad save fail identically.
@@ -210,6 +212,13 @@ Folders you always want readable go in config:filesystem.readRoots.
       'thought signature', 'gemini 4', 'gemini 3', 'qwen',
     ],
     body: `
+**Seats take a provider and a model.** Every seat - each specialist role in Agents, the decision model, the
+reranker, the Auditor, the Anti Hallucinator, suggestions while typing - chooses a provider profile and then **Its
+model** from that provider's own list (loaded by itself; a name can be typed too). Empty is the profile's own model. So
+one provider profile serves every seat that uses it - no need for a profile per model. In Settings → Providers the
+model list loads by itself as soon as the address and key are filled in (or when a saved profile is opened); Refresh is
+only for a list that changed.
+
 **Settings → Providers.** Several named profiles, switchable from the composer. Three wire
 formats: OpenAI-compatible, Anthropic Messages, and Gemini - plus **GitHub Copilot from VS Code**
 (see the GitHub Copilot topic). Presets prefill a base URL and wire
@@ -514,8 +523,16 @@ definitions have to stay stable for a whole turn or the prompt cache is thrown a
     keywords: [
       'mcp', 'server', 'stdio', 'http', 'tools', 'npx', 'timeout', 'disable', 'clone', 'copy server', 'duplicate',
       '401', 'unauthorized', 'unauthorised', 'mcp header', 'bearer', 'transport', 'sse', 'streamable http', 'env:',
+      'unable to verify the first certificate', 'certificate', 'self signed', 'self-signed', 'verify certificate', 'ca file',
     ],
     body: `
+**Certificates for an HTTP server:** it goes out through Light Code's own connection, which trusts the Windows
+certificate store and Settings → Network's certificate - the same in VS Code and Fire Code (before, Fire Code trusted
+neither and said "unable to verify the first certificate"). For a certificate neither has, give the server a **CA
+certificate** file in its form; **Don't verify this server's certificate** is the escape hatch (anything in between
+can then read the traffic, tokens included). Options typed on one line under Arguments are passed as separate
+arguments.
+
 **Settings → MCP.** The config shape is the standard \`mcpServers\` one, so a config copied from
 another client can be pasted unchanged. Transport is inferred: \`command\` means stdio, \`url\`
 means HTTP. For an HTTP server, **Transport** chooses the protocol: *Automatic* tries Streamable HTTP
@@ -1377,6 +1394,8 @@ still change files by hand.
       'second model', 'reviewer', 'read_audit_log', 'audit index', 'handoff', 'observer',
       'audit everything', 'everything the agent does', 'what the agent did', 'audit the agent',
       'something dangerous', 'does something dangerous', 'dangerous command', 'not allowed to', 'from hallucinating', 'is hallucinating', 'hallucinates', 'makes things up', 'keep the agent focused', 'audit log',
+      'which models', 'which roles', 'roles report', 'report on this chat', 'who worked on', 'models used',
+      'behind the scenes', 'what happened', 'task report', 'audit report', 'how the reranker was used', 'how the decision model was used',
     ],
     body: `
 **Settings → Project → Auditor** and **Anti Hallucinator**, saved for the open project (\`observers\` in
@@ -1396,6 +1415,16 @@ tool the mode does not allow. That is a Windows notification in Fire Code and a 
 them becomes one notice. With a model chosen, the Auditor also reviews each batch of steps and raises its own
 alerts. Agents can read the record back with **read_audit_log** (summary first, then records with filters;
 rows go straight into the dataframe tool for custom analysis).
+
+**What happened in a task:** **Report on this chat** (in the Auditor panel), or ask the agent - it uses
+\`read_audit_log\` with action \`roles\`. It lists who took part - the main agent's model and mode, every specialist
+consulted with its model, how often and how long (and which failed), the decision model, the reranker and the
+reviewers - and then, **request by request, everything that happened behind the scenes**: each decision model choice
+with its probability (routing, picks, loop verdicts, first passes), each time the reranker reordered a search (which
+search, how many candidates, what it put first with scores, what it set aside - or that it did not answer and the
+search kept its own order), the memory kept, selected or used to redirect the agent, specialists consulted, retried
+model requests, compaction, denials, refusals, alerts and the Anti Hallucinator's notes. Read from the record as it
+happened, so you can check things went the way you wanted. Recorded while the Auditor is on.
 
 **With a decision model** (Settings → Agents → Decision model, e.g. D3), the Anti Hallucinator gets a **first pass**:
 the decision model is asked, for each step, whether it is grounded in its tool results and still on your request. A
@@ -2179,6 +2208,12 @@ every column - by two to three times on 8 cores; a light filtered count is limit
 reads the one stopped at a breakpoint - call stack, variables, recent output - through the same private
 link Copilot uses. Read-only: it cannot step or continue. IntelliJ and PyCharm are not supported yet.
 
+**DataFrames and complex objects:** a variable shows only the debugger's summary (a DataFrame as its type and shape).
+\`read_debug_session\` with \`expand\` opens one up through the debugger - its columns, attributes or items, a few levels
+deep, running nothing. For the data itself, \`evaluate_in_debug_session\` evaluates an expression where the program
+stopped (\`df.head(50).to_string()\`, \`vars(obj)\`) and asks you first with the exact expression, because it runs code
+in your program. Both work in VS Code and, through VS Code, from Fire Code.
+
 **Memory and disk.** Each chat is its own agent process. A chat page you are not looking at is
 **unloaded after a few idle minutes** while its agent keeps running (Settings → *Unload hidden chat
 pages after*; never while it is working or waiting for you), and a whole codebase **sleeps** after
@@ -2902,7 +2937,7 @@ transcript was written.
     title: "Consulting your organisation's web chat (such as Gemini)",
     keywords: [
       'web chat', 'webchat', 'gemini', 'ask_web_chat', 'chrome', 'chrome mcp', 'chrome devtools', 'browser', 'internal chat',
-      'consult gemini', 'second opinion', 'capture', 'backend address', 'inside the network', 'outside the organisation',
+      'consult gemini', 'second opinion', 'capture', 'backend address', 'chat window', 'another site', 'on another site', 'test both ways', 'backup way', 'primary way', 'fix it for me', 'cannot be used yet', 'must include', 'which chrome', 'devtoolsactiveport', 'could not connect to chrome', 'remote debugging', 'already running', 'isolated', 'wrong answer', 'answer extraction', 'inside the network', 'outside the organisation',
     ],
     body: `
 **\`ask_web_chat\` consults the model behind your organisation's internal web chat** - for when a model (Gemini, say) is
@@ -2914,14 +2949,43 @@ DevTools MCP server is connected, and never on a shared server.
 1. **Give the web chat a Chrome DevTools MCP server of its own** - a second entry in Settings → MCP under its own name
    (e.g. chrome-webchat), so any Chrome server you already use is left exactly as it is - and choose it in the Web chat
    panel. Add it with \`--autoConnect\`, \`--no-usage-statistics\` and
-   \`--no-performance-crux\` (the panel shows the entry to paste), and allow it in Chrome at
-   chrome://inspect/#remote-debugging. Either installed once (\`npm i -g chrome-devtools-mcp\`), or run with **npx**
+   \`--no-performance-crux\`. Typed on one line, or the whole command line typed into Command, they are split into
+   separate arguments when the server starts (a line with quotes or a backslash is left as typed). When the panel says
+   the server **cannot be used yet**, press **Fix it for me**: it adds what is missing to that server's entry (each
+   option on its own line, npx pinned to the tested version) and restarts it. The panel shows the entry to paste.
+   **Which Chrome** (in the panel, once a server is chosen):
+   - **Your own Chrome** (\`--autoConnect\`): the Chrome you have open, already signed in; VS Code and Fire Code can
+     both use it. Needs Chrome 144 or newer with remote debugging switched on once at chrome://inspect/#remote-debugging
+     - otherwise it fails with "Could not connect to Chrome ... DevToolsActivePort". Your organisation may block it.
+   - **A Chrome it starts**: the server opens a Chrome with a profile of its own - sign in to the web chat there once
+     and it remembers. Only one app at a time can have it ("The browser is already running ... Use --isolated" means
+     another app has it).
+   Either installed once (\`npm i -g chrome-devtools-mcp\`), or run with **npx**
    and a pinned version (\`chrome-devtools-mcp@1.13.0\`, not \`@latest\`); the panel shows where npx downloads it from
    (\`npm config get registry\` - it should be your organisation's registry).
 2. Type the web chat page's address and press **Capture**. In the tab Light Code selects, start a new chat, choose the
    model, and send the phrase shown (or press **Send it for me**).
 3. Light Code shows the request that carried it: **the backend address**, the model, and the start of the answer it read.
    **Use this** approves it - only that backend address is ever used afterwards. **Capture again** to change it.
+
+**Two ways a question is sent, wherever the backend is (its own site or another, such as an \`api.\` address):**
+- **Directly (the primary way):** Light Code sends the approved request itself, from inside the chat page, signed in as
+  you, to exactly the approved address - with cookies or without, as the page's own request was.
+- **Through the chat window (the backup):** when the direct request is refused or fails, the question is typed into the
+  chat and sent, as you would, and the answer is read from the page's own reply from the approved backend. A path part
+  that is plainly an id (a conversation id) may differ; anything else must match. When no such reply is seen (a chat
+  over a WebSocket), the answer is read off the screen once it stops changing, and the result says so. A sign-in
+  refusal (401/403) is not retried this way - sign in to the web chat in Chrome.
+- **Test both ways** (beside Capture again) asks one short question each way and shows which works here, how long
+  each took, the answer, and what the reply was made of (its fields and sizes, never its text) - send that line if the
+  answer looks wrong.
+
+**If the answer is wrong** (a run of words like \`chat_idprogresscompletion…\`): the answer was read from the field that
+labels each event. Since 0.229.0 such fields are never taken, ids rank below words, and a capture saved earlier is read
+afresh - no need to capture again. **"The browser is already running … Use --isolated"**: this copy of the Chrome
+DevTools server is starting a Chrome of its own while another copy (VS Code's, another chat's) already has - give it
+\`--autoConnect\` on its own line so every copy uses your own Chrome. \`--isolated\` would start a Chrome that is not
+signed in to the web chat.
 
 **It cannot go outside the organisation, by rule - each checked before every consultation, and nothing is sent when one fails:**
 - Light Code opens no connection itself: the request runs inside the chat page, in your Chrome, to the approved
@@ -2941,6 +3005,43 @@ when you type into it. Put in a question only what you would paste into that cha
 **Using it:** ask in plain words ("ask the web chat / Gemini what it thinks of this design"), or let the assistant decide
 when a second opinion is worth an approval. Gemini sees only the question - the assistant puts the code and context in it.
 If the chat tab is signed out, it says so; if the chat changed how it replies, it says to capture again.
+`,
+  },
+  {
+    id: 'reranker',
+    title: 'Reranker (BGE) relevance scoring',
+    keywords: [
+      'reranker', 'rerank', 'reranking', 'bge', 'bge reranker', 'bge-reranker', 'cross encoder', 'cross-encoder', 'relevance',
+      'relevance score', 'better search', 'search quality', 'wrong skill found', 'wrong tool found', 'test reranker', 'tei',
+      'infinity', '/rerank', '/v1/rerank', '/v1/score', 'set aside', 'the reranker', 'reranker work', 'reranker for', 'with the reranker',
+    ],
+    body: `
+**A reranker reads each thing a search found together with the question, and puts the most relevant first** - BAAI's
+bge-reranker-v2-m3 is one. Set it up under Settings → Providers as an **OpenAI-compatible** profile (its server's
+address as the base URL, with or without /v1, and its model name), then choose it in Settings → Search → **Reranker**
+(config:reranker.profileId). Until one is chosen, searches work exactly as before.
+
+**Where it is used** (each can be switched off):
+- **Finding tools and skills** (\`search_docs\`, config:reranker.docs): the vector index's nearest
+  config:reranker.candidates (30) are reordered and the best kept. **With no vector index at all**, it ranks every
+  tool and skill on its name, description and parameter names - far better than the word match used otherwise.
+- **Team skills** (\`search_team_skills\`, config:reranker.teamSkills) and **codebase search** (\`search_codebase\`,
+  config:reranker.codebase): more candidates are fetched, reordered, and the best returned, each with "relevance 0.93".
+- **With a decision model too** (config:reranker.picks): the per-chat skill and tool picks first narrow every skill and
+  tool to the ten the reranker puts first, and the decision model chooses among those - sure of a choice between ten,
+  where among a hundred and thirty it rarely was. Nothing else the decision model does involves the reranker.
+
+Results scoring under config:reranker.minScore (0.05) are set aside, and the result says how many.
+
+**Finding the server:** automatic tries \`/v1/rerank\` and \`/rerank\` (vLLM, Infinity, Jina and Cohere style:
+documents in, relevance scores out), TEI's \`/rerank\` (texts in), then vLLM's \`/v1/score\`, from the server's root
+(a base URL ending in /v1 is fine), and remembers which answered. If your gateway puts it elsewhere, type the path in
+**Endpoint** (config:reranker.endpoint) - added to the base URL as typed. **Test reranker** ranks four sample texts
+against one question and shows the order, the scores, the time and where it answered.
+
+**It never stops a search:** slow (5 seconds; 2 for the picks), refused or misshapen, and the search keeps its own
+order and says "The reranker did not answer (...)". It is sent the question and the texts searched - skill and tool
+descriptions, code chunks - only at the profile's own address; the setting is yours alone, never a repository's.
 `,
   },
   {
@@ -2997,6 +3098,11 @@ Also, each with its own switch in the same panel (all on once a decision model i
   approved as always. **Speed:** once per message (not per step); with both, the two questions go at once, and D3
   generates no text, so it is usually a fraction of a second before the reply starts; it never waits more than 4
   seconds, and a late answer is simply not used. A chat with Picks off asks nothing. Not for scheduled runs.
+  **With a reranker too** (Settings → Search → Reranker, config:reranker.picks): the reranker first narrows every skill
+  and tool to the ten most relevant to the request, and the decision model chooses among those - a choice between ten it
+  can be sure about, where among a hundred and thirty the probability spread too thin to pass the threshold. The
+  reranker gets 2 seconds; if it does not answer, the decision model chooses among all of them as before. See the
+  reranker topic.
 - **Anti Hallucinator first pass** (config:decisionModel.firstPass): a step it is sure is grounded and on course
   (config:decisionModel.firstPassThreshold, default 0.85) is reviewed with the next one instead of on its own.
 - **Decision steps** in the Strategy window: a step whose next step it picks (see the strategies topic).
@@ -3015,6 +3121,38 @@ seconds) is skipped for that message, with a one-line note.
 `,
   },
   {
+    id: 'memory',
+    title: "The codebase's memory of your corrections",
+    keywords: [
+      'memory', 'remember', 'remembered', 'remembered guidance', 'forget', 'keeps forgetting', 'i told you', 'told you before',
+      'correction', 'corrections', 'every chat', 'next chat', 'from now on', 'always do', 'never do', 'memory db',
+    ],
+    body: `
+**The codebase keeps a memory of the short corrections and guidance you give the agent** ("always run the tests
+with -x", "we never edit generated files"), so they apply in every later chat. Settings → Project → **Memory**.
+
+- **The Anti Hallucinator keeps it** while it is on: when your message gives guidance meant to last, it adds it as one
+  short sentence, with what you said. A one-off instruction for the task is not kept.
+- **Every chat's agent is given it**, after the codebase instructions; what you ask now still wins over it.
+- **The Anti Hallucinator redirects with it**: when the agent is about to go against an entry, its note names it, and
+  the panel counts how often each entry redirected the agent.
+- **You manage it**: every entry can be edited or removed, and you can add your own. Switch it off there
+  (config:observers.antiHallucination.memory); nothing is then added or given to the agent.
+
+**Where it is kept:** a plain file per codebase, not a vector store - so it works with no search connection set up,
+and nothing about it is sent anywhere except to your own chat's model and the Anti Hallucinator.
+
+**As it grows:** every entry is given while they fit (about 6,000 characters, 40 entries). Past that, each request gets
+the entries that bear on it - by the reranker when one is set up, otherwise shared words, with a little weight for
+entries you added and ones that redirected the agent before - so an old entry about this request is used and a new one
+about something else waits. The agent is told how many others there are. The Anti Hallucinator gets the same ones, and
+gets them again whenever its process is replaced (a handoff, a crash, a restart). Up to 500 are kept; an entry you
+added is never removed to make room.
+
+Kept on this computer, outside the repository, one per codebase and shared by its chats. It is not part of an export.
+`,
+  },
+  {
     id: 'typing-suggestions',
     title: 'Suggestions while typing in the chat box',
     keywords: [
@@ -3024,7 +3162,7 @@ seconds) is skipped for that message, with a one-line note.
     ],
     body: `
 **The chat's model can suggest the rest of what you are typing**, in grey after the cursor. Off unless you turn
-it on: Settings → Appearance → **Suggestions while typing** (config:composerCompletion).
+it on: Settings → Project → **Suggestions while typing** (config:composerCompletion).
 
 - **Tab** takes the next word, so you can take part of a suggestion and go on typing.
 - **Ctrl+Space**, or **Right arrow** with the cursor at the end, takes all of it.
@@ -3035,6 +3173,17 @@ end. It uses the model selected for the chat, with your text and the last few me
 output), and is cut to one line. Each pause is one request to that model's gateway - that is why it is a switch. A
 slow or failing request shows nothing; it never puts an error in the chat. While the \`@\` or \`#\` picker is open,
 Tab and the arrows belong to the picker.
+
+**With a thinking model** (Qwen3, Gemini 2.5 and later) the request asks it not to think (\`enable_thinking: false\`
+for Qwen, \`thinkingBudget: 0\` for Gemini) - it used to spend the whole time limit thinking, so nothing appeared. A
+suggestion has 12 seconds.
+
+**No suggestion appears?** The panel says why under **Last suggestion** - most often that the model did not start
+answering within 12 seconds. A large model is usually too slow for this: choose the provider under **Model for
+suggestions** (config:composerCompletionProfileId) and a small, fast model from it under **Its model**
+(config:composerCompletionModel) - a Flash or mini model - and the chat keeps its own model. A 404 means the model
+name is not available to that provider or key: pick one from the list. Why a suggestion did not come is also written
+to the log.
 `,
   },
   {

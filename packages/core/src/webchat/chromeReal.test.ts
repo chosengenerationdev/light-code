@@ -125,3 +125,92 @@ describe.skipIf(!run)('the web chat through the real chrome-devtools-mcp 1.13.0 
     expect(after).toBe(before)
   }, 180_000)
 })
+
+/*
+ * Reported: "POST <url> on another site than the web chat ... so it is not used" - the chat's backend is on another site.
+ * Such a chat is used through its window: typed in, the answer read from the page's own reply. A stand-in page on one
+ * origin whose backend is on another, with the conversation id in the path.
+ */
+let api: Server
+let apiOrigin = ''
+let windowPage: Server
+let windowPageUrl = ''
+
+const WINDOW_HTML = (apiBase: string): string => `<!doctype html><html><head><title>Internal AI Chat</title></head><body>
+<textarea id="box"></textarea><div id="out"></div>
+<script>
+const CONVERSATION = '8f3a9c2e41d7b6a0'
+async function send(text) {
+  document.getElementById('box').value = ''
+  const line = document.createElement('div'); line.textContent = 'You: ' + text; document.getElementById('out').appendChild(line)
+  const r = await fetch('${apiBase}/v2/conversations/' + CONVERSATION + '/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gemini-pro', content: text }) })
+  const j = await r.json()
+  const reply = document.createElement('div'); reply.textContent = 'Bot: ' + j.message.text; document.getElementById('out').appendChild(reply)
+}
+document.getElementById('box').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(e.target.value) } })
+</script></body></html>`
+
+describe.skipIf(!run)('a web chat whose backend is on another site, through its window', () => {
+  beforeAll(async () => {
+    api = createServer((request, response) => {
+      let raw = ''
+      request.on('data', (chunk: Buffer) => (raw += chunk.toString('utf8')))
+      request.on('end', () => {
+        const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type', 'Access-Control-Allow-Methods': 'POST', Connection: 'close' }
+        if (request.method === 'OPTIONS') {
+          response.writeHead(204, cors).end()
+          return
+        }
+        const body = JSON.parse(raw) as { model: string; content: string }
+        response.writeHead(200, { ...cors, 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ id: 'm-42', message: { role: 'assistant', text: `${body.model} says: ${body.content}` } }))
+      })
+    })
+    await new Promise<void>((resolve) => api.listen(0, '127.0.0.1', () => resolve()))
+    apiOrigin = `http://127.0.0.1:${String((api.address() as AddressInfo).port)}`
+    windowPage = createServer((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'text/html', Connection: 'close' })
+      response.end(WINDOW_HTML(apiOrigin))
+    })
+    await new Promise<void>((resolve) => windowPage.listen(0, '127.0.0.1', () => resolve()))
+    windowPageUrl = `http://127.0.0.1:${String((windowPage.address() as AddressInfo).port)}/`
+  })
+
+  afterAll(() => {
+    api.closeAllConnections()
+    api.close()
+    windowPage.closeAllConnections()
+    windowPage.close()
+  })
+
+  it('captures it, asks the other site directly, and through the chat window by typing', async () => {
+    const { askThroughWindow } = await import('./chrome.js')
+    const origin = new URL(windowPageUrl).origin
+    const pageId = await selectWebChatPage(chrome, windowPageUrl)
+    const phrase = capturePhrase()
+    expect(await runScript(chrome, watchScript(origin, phrase), pageId)).toMatchObject({ ok: true })
+    expect(await runScript(chrome, typePhraseScript(origin, phrase), pageId)).toMatchObject({ ok: true })
+    let found: CapturedRequest[] = []
+    for (let i = 0; i < 40 && found.length === 0; i += 1) {
+      found = ((await runScript(chrome, readCaptureScript(origin), pageId))['found'] as CapturedRequest[] | undefined) ?? []
+      if (found.length === 0) await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+    const { candidates } = candidatesFrom(found, windowPageUrl, phrase)
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0]).toMatchObject({ window: true, backend: `${apiOrigin}/v2/conversations/8f3a9c2e41d7b6a0/messages` })
+    const setup = candidates[0]!.setup
+    expect(setup.method).toBe('replay')
+
+    // Primary way: straight to the approved address on the other site, from inside the page, as the page sends it.
+    expect(await askWebChat(chrome, setup, 'What is 1 + 1?')).toBe('gemini-pro says: What is 1 + 1?')
+
+    const read = await askThroughWindow(chrome, setup, 'What is 2 + 2?', { timeoutMs: 60_000 })
+    expect(read).toEqual({ answer: 'gemini-pro says: What is 2 + 2?', from: 'reply' })
+
+    // A reply from a path that is not the approved one is never taken: the screen is read instead.
+    const elsewhere = { ...setup, backendUrl: `${apiOrigin}/v2/other/8f3a9c2e41d7b6a0/messages` }
+    const fromScreen = await askThroughWindow(chrome, elsewhere, 'And 3 + 3?', { timeoutMs: 60_000, quietMs: 1500 })
+    expect(fromScreen.from).toBe('screen')
+    expect(fromScreen.answer).toContain('gemini-pro says: And 3 + 3?')
+  }, 180_000)
+})

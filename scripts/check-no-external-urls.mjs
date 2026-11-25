@@ -38,6 +38,8 @@ const ALLOWED_HOSTS = new Map([
   ['api.openai.com', 'provider preset'],
   ['api.deepseek.com', 'provider preset'],
   ['api.anthropic.com', 'provider preset'],
+  // Placeholder in Settings → Agents → Web chat's page address box; the .internal name cannot resolve.
+  ['ai-chat.your-organisation.internal', 'web chat page address placeholder'],
   ['generativelanguage.googleapis.com', 'provider preset (Gemini)'],
 
   // --- Example text. The proxy field's placeholder and the handbook's example address

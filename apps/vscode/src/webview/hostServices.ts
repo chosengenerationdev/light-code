@@ -4,7 +4,7 @@ import * as vscode from 'vscode'
 import { findFireCodeHelper, personalLibraryDir, sharedMachineApprovalsFile, Logger, foldersOf, mentionExcludeGlob, mentionGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
 import { VSCodeConfigStore } from '../platform/config.js'
 import { createVSCodeDiagnostics } from '../platform/diagnostics.js'
-import { readDebugSession, startTrackingDebugSessions } from '../platform/debugSession.js'
+import { evaluateInDebugSession, readDebugSession, startTrackingDebugSessions } from '../platform/debugSession.js'
 import { vscodeLanguageModels } from '../platform/languageModels.js'
 import { createRipgrepResolver } from '../platform/ripgrep.js'
 import { VSCodeSecretStore } from '../platform/secrets.js'
@@ -218,6 +218,7 @@ export function createVSCodeHostServices(
      ripgrepPath: createRipgrepResolver(context.extensionPath, logger, { appRoot: vscode.env.appRoot }),
     logSink,
     readDebugSession,
+    evaluateInDebugSession,
     /*
      * The Rust helper. Fire Code's, when it is installed, because it is the full one (`dataframe` too);
      * otherwise the slim one this Windows package carries (esbuild.mjs), which has every other tool and

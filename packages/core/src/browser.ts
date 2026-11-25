@@ -173,7 +173,7 @@ export type { Schedule, ScheduleTrigger, Schedules, ScheduleRun } from './schedu
 export { riskyGroupsIn } from './schedule/types.js'
 export { describeTrigger, describeNextRun, nextFireTime, isDue } from './schedule/timing.js'
 export type { AddonPageView, AddonView } from './agent/protocol.js'
-export type { DecisionModelSettings, DecisionTestResult } from './agent/protocol.js'
+export type { DecisionModelSettings, DecisionTestResult, RerankerSettings, RerankerTestResult, WebChatTestResult } from './agent/protocol.js'
 export type { AddonField, AddonPage } from './addons/page.js'
 export { cleanAddonValues, isShown } from './addons/page.js'
 export type { ScheduleToolInfo, SchedulerStatus } from './agent/protocol.js'

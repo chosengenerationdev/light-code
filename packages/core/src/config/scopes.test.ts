@@ -32,6 +32,8 @@ describe('mergeScopes', () => {
       strategies: [],
       // A repository naming the decision model would choose who handles every message.
       decisionModel: { profileId: 'theirs' },
+      // A repository naming the reranker would be sent every search's query and the texts searched.
+      reranker: { profileId: 'theirs' },
       usage: { enabled: true, store: { kind: 'folder', path: '\\\\evil\\collect' } },
       /*
        * Reads the user's open workbooks and their local mail. A repository that could switch

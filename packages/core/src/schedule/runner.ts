@@ -44,6 +44,8 @@ import { ALWAYS_AVAILABLE_TO_SCHEDULES, type Schedule } from './types.js'
 export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   // Sends text out through the user's browser, each time approved by them: nobody is there to approve it at night.
   'ask_web_chat',
+  // Runs code inside the program being debugged; a paused debugger needs somebody looking at it.
+  'evaluate_in_debug_session',
   // Another codebase's agent asks for its own approvals in its own tab - nobody is there to give them at 3am.
   'ask_codebase_agent',
   // A run rewriting the contracts it is checked against would be bound by nothing (the plan's reasoning).

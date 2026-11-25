@@ -1,8 +1,10 @@
 import { z } from 'zod'
 
 import { renderTeamSkillHits, searchTeamSkills, type TeamSkillsOptions } from '../rag/teamSkills.js'
+import { searchFailure } from '../rag/embedder.js'
 import type { SearchObserver } from '../rag/searchLog.js'
 import { resolveSearchScope, type DefaultSearchScope } from '../sharing/scope.js'
+import { reorder, type Reranking } from '../rerank/rerank.js'
 import type { Tool, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
@@ -29,6 +31,8 @@ export interface SearchTeamSkillsToolOptions extends TeamSkillsOptions {
   currentProject?: () => readonly string[]
   /** The default chosen in Settings -> Project, for a request that names no project or author. */
   defaultScope?: () => DefaultSearchScope
+  /** A reranker (rerank/rerank.ts): more skills are fetched, and it puts the most relevant first. */
+  reranking?: Reranking
 }
 
 /**
@@ -60,7 +64,20 @@ export function createSearchTeamSkillsTool(
       const startedAt = Date.now()
       try {
         const scope = resolveSearchScope(params, options.currentProject?.() ?? [], options.defaultScope?.())
-        const found = await searchTeamSkills(options, params.query, params.size ?? 5, undefined, scope)
+        const size = params.size ?? 5
+        const found = await searchTeamSkills(options, params.query, options.reranking !== undefined ? Math.max(size, options.reranking.candidates) : size, undefined, scope)
+        /*
+         * With a reranker, the nearest skills are only candidates: it reads each with the question and puts the most
+         * relevant first, setting aside what scores too low. Without one, or when it fails, the index's own order.
+         */
+        let rerankNote: string | undefined
+        if (options.reranking !== undefined && found.hits.length > 0) {
+          const ordered = await reorder(options.reranking, params.query, found.hits, (hit) => `${hit.name}\n${hit.text}`, size)
+          found.hits = ordered.items.map((entry) => (entry.score !== undefined ? { ...entry.item, relevance: entry.score } : entry.item))
+          rerankNote = ordered.note ?? (ordered.dropped > 0 ? `The reranker set aside ${String(ordered.dropped)} weak match(es).` : undefined)
+        } else {
+          found.hits = found.hits.slice(0, size)
+        }
         options.observer?.record({
           at: startedAt,
           source: 'search_team_skills',
@@ -72,7 +89,8 @@ export function createSearchTeamSkillsTool(
           elapsedMs: Date.now() - startedAt,
           via: 'index',
         })
-        return { content: renderTeamSkillHits(found, params.query, scope) }
+        const content = renderTeamSkillHits(found, params.query, scope)
+        return { content: rerankNote !== undefined ? `${content}\n\n${rerankNote}` : content }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         options.observer?.record({
@@ -85,7 +103,7 @@ export function createSearchTeamSkillsTool(
           elapsedMs: Date.now() - startedAt,
           error: message,
         })
-        return { content: message, isError: true }
+        return { content: searchFailure(message, 'use the skills listed in your instructions and what you can read in this workspace.'), isError: true }
       }
     },
   }

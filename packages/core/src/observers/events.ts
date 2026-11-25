@@ -9,7 +9,15 @@ import { matchRiskyCommand, type RiskyCommandRule } from '../approval/riskyComma
  * observer processes all get the same record.
  */
 export type ObservedEvent =
-  | { kind: 'turnStart'; at: number; text: string; mode: string; model: string }
+  | { kind: 'turnStart'; at: number; text: string; mode: string; model: string; participants?: Record<string, string> }
+  /**
+   * Something Light Code did behind the scenes for the request - the reranker reordering a search, the memory kept or
+   * selected, a model request retried - in a sentence, for the Auditor's record and the task report. Never sent to the
+   * Anti Hallucinator: it is about Light Code's machinery, not the agent's reasoning.
+   */
+  | { kind: 'behind'; at: number; area: string; summary: string }
+  /** A specialist consulted (ask_agent, a strategy step): the role, the model behind it, how long, whether it answered. */
+  | { kind: 'consultation'; at: number; role: string; name: string; model: string; ms: number; ok: boolean; readOnly?: boolean }
   | { kind: 'reasoning'; at: number; text: string }
   | { kind: 'assistant'; at: number; text: string }
   | { kind: 'toolCall'; at: number; tool: string; args: string }
@@ -19,6 +27,8 @@ export type ObservedEvent =
   | { kind: 'turnEnd'; at: number; ending: 'done' | 'question' | 'error' | 'cancelled'; error?: string }
   /** The decision model's answer and what Light Code did with it (Agent team routing, a strategy loop's verdict). */
   | { kind: 'decision'; at: number; purpose: string; question: string; outcome: string; probabilities?: Record<string, number> }
+  /** The codebase's memory, numbered (M1, M2...), sent to the Anti Hallucinator when it changes - never recorded. */
+  | { kind: 'memory'; at: number; text: string }
 
 /** Per field, in characters. Reasoning and results are where the volume is. */
 export const EVENT_LIMITS = { text: 8_000, reasoning: 6_000, args: 4_000, preview: 4_000, result: 3_000 } as const
@@ -48,6 +58,12 @@ export function capEvent(event: ObservedEvent): ObservedEvent {
       return event.error === undefined ? event : { ...event, error: cap(event.error, EVENT_LIMITS.result) }
     case 'decision':
       return { ...event, question: cap(event.question, EVENT_LIMITS.text) }
+    case 'memory':
+      return { ...event, text: cap(event.text, 40_000) }
+    case 'consultation':
+      return event
+    case 'behind':
+      return { ...event, summary: cap(event.summary, EVENT_LIMITS.result) }
   }
 }
 
@@ -140,6 +156,22 @@ export function guardVerdict(reply: unknown): GuardVerdict | undefined {
   const note = typeof r['note'] === 'string' ? r['note'].trim() : ''
   if (note.length === 0) return undefined
   return { note: cap(note, 800), severity: r['severity'] === 'high' ? 'high' : 'low' }
+}
+
+/**
+ * The memory points in the Anti Hallucinator's reply: `remember` (new lasting guidance the user gave, each a short
+ * sentence) and `applied` (the memory entries, by number, a note of this reply rests on). At most five points.
+ */
+export function guardMemory(reply: unknown): { remember: string[]; applied: number[] } {
+  if (typeof reply !== 'object' || reply === null) return { remember: [], applied: [] }
+  const r = reply as Record<string, unknown>
+  const remember = Array.isArray(r['remember'])
+    ? r['remember'].filter((p): p is string => typeof p === 'string' && p.trim().length >= 4).slice(0, 5).map((p) => p.trim().slice(0, 300))
+    : []
+  const applied = Array.isArray(r['applied'])
+    ? r['applied'].map((p) => (typeof p === 'number' ? p : typeof p === 'string' ? Number.parseInt(p.replace(/^m/i, ''), 10) : Number.NaN)).filter((n) => Number.isInteger(n) && n > 0)
+    : []
+  return { remember, applied }
 }
 
 /**

@@ -1,6 +1,6 @@
 import type { RawToolResult } from '../mcp/client.js'
 import { readAnswer } from './answer.js'
-import { askScript, scriptResult, watchScript } from './inpage.js'
+import { askScript, pageTextScript, readRepliesScript, scriptResult, typeTextScript, watchScript } from './inpage.js'
 import type { WebChatSetup } from './setup.js'
 
 /**
@@ -64,6 +64,37 @@ function sameOrigin(url: string, origin: string): boolean {
 }
 
 /**
+ * Chrome's own error, with what to do when the cause is one Light Code can name. Reported from Fire Code: "The browser is
+ * already running for ...chrome-profile. Use --isolated" - a server without --autoConnect starts a Chrome of its own on
+ * one fixed profile, so a second copy of the server (VS Code's and Fire Code's at once) cannot. --isolated would start a
+ * Chrome that is not signed in to the web chat, so it is not the advice.
+ */
+export function explainChromeError(text: string): string {
+  const clipped = text.slice(0, 300)
+  if (/already running for/i.test(text)) {
+    return (
+      `${clipped}\n\nAnother copy of the Chrome DevTools MCP server (in VS Code, Fire Code or another chat) has already started its own Chrome ` +
+      'with that profile, and only one can. In Settings → Agents → Web chat, set "Which Chrome" to "Your own Chrome" (and switch remote ' +
+      'debugging on once in your Chrome at chrome://inspect/#remote-debugging): every copy then uses your own Chrome, where you are ' +
+      'signed in to the web chat. Or close the other one.'
+    )
+  }
+  /*
+   * --autoConnect with remote debugging not switched on in the person's Chrome (reported: "could not find
+   * DevToolsActivePort"). It worked before only because the flag had been ignored and a Chrome of its own was started.
+   */
+  if (/DevToolsActivePort|Could not connect to Chrome/i.test(text)) {
+    return (
+      `${clipped}\n\nThe server is set to use your own Chrome, and your Chrome is not accepting it. Either: open ` +
+      'chrome://inspect/#remote-debugging in your Chrome and switch remote debugging on (Chrome 144 or newer; your organisation ' +
+      'may block it), then try again - or, in Settings → Agents → Web chat, set "Which Chrome" to "A Chrome it starts": the ' +
+      'server opens a Chrome of its own (sign in to the web chat there once; it remembers) - only one app at a time can use that one.'
+    )
+  }
+  return clipped
+}
+
+/**
  * The web chat's tab, made the one scripts run on: an open tab on the same site (the selected one first), else a new
  * tab at the page address. Never any other site. Returns its id for `evaluate_script` - undefined from an older server
  * that has no ids and runs on the selected tab.
@@ -71,6 +102,7 @@ function sameOrigin(url: string, origin: string): boolean {
 export async function selectWebChatPage(chrome: ChromeAccess, pageUrl: string): Promise<number | undefined> {
   const origin = new URL(pageUrl).origin
   const listed = await chrome.call('list_pages', {})
+  if (listed.isError && /already running for/i.test(listed.text)) throw new Error(`Chrome could not start: ${explainChromeError(listed.text)}`)
   const existing = listed.isError ? [] : pagesIn(listed.text).filter((page) => sameOrigin(page.url, origin))
   const chosen = existing.find((page) => page.selected) ?? existing[0]
   if (chosen !== undefined) {
@@ -78,12 +110,12 @@ export async function selectWebChatPage(chrome: ChromeAccess, pageUrl: string): 
       const names = propertyNames(chrome.schema('select_page'))
       const key = names.includes('pageId') ? 'pageId' : (names.find((name) => /idx|index|id/i.test(name)) ?? 'pageId')
       const selected = await chrome.call('select_page', { [key]: chosen.id })
-      if (selected.isError) throw new Error(`Chrome could not select the web chat tab: ${selected.text.slice(0, 300)}`)
+      if (selected.isError) throw new Error(`Chrome could not select the web chat tab: ${explainChromeError(selected.text)}`)
     }
     return chosen.id
   }
   const opened = await chrome.call('new_page', { url: pageUrl })
-  if (opened.isError) throw new Error(`Chrome could not open ${pageUrl}: ${opened.text.slice(0, 300)}`)
+  if (opened.isError) throw new Error(`Chrome could not open ${pageUrl}: ${explainChromeError(opened.text)}`)
   const now = pagesIn(opened.text).filter((page) => sameOrigin(page.url, origin))
   const fresh = now.find((page) => page.selected) ?? now.at(-1)
   if (fresh !== undefined) return fresh.id
@@ -105,18 +137,19 @@ export async function runScript(chrome: ChromeAccess, source: string, pageId: nu
   // These scripts only read and send; waiting for the page to settle first only slows them down.
   if (names.includes('waitForStableDom')) args['waitForStableDom'] = false
   const result = await chrome.call('evaluate_script', args)
-  if (result.isError) throw new Error(`Chrome could not run the script: ${result.text.slice(0, 400)}`)
+  if (result.isError) throw new Error(`Chrome could not run the script: ${explainChromeError(result.text)}`)
   const value = result.structured ?? scriptResult(result.text)
   if (value === null || typeof value !== 'object') throw new Error(`Chrome returned something unexpected: ${result.text.slice(0, 300)}`)
   return value as Record<string, unknown>
 }
 
 /** One consultation, start to finish. Throws with a sentence saying what to do when it cannot be answered. */
-export async function askWebChat(chrome: ChromeAccess, setup: WebChatSetup, question: string): Promise<string> {
+export async function askWebChat(chrome: ChromeAccess, setup: WebChatSetup, question: string, options: { onReply?: (text: string) => void } = {}): Promise<string> {
   const origin = new URL(setup.pageUrl).origin
   const pageId = await selectWebChatPage(chrome, setup.pageUrl)
   // Watching the page's own requests is what lets a credential header be taken from it rather than stored.
-  const watched = await runScript(chrome, watchScript(origin, undefined), pageId)
+  // Watching the approved backend too, so the page's sign-in header is kept from its requests there (another site or not).
+  const watched = await runScript(chrome, watchScript(origin, undefined, setup.backendUrl ?? new URL(setup.request.path, origin).href), pageId)
   if (watched['ok'] !== true) throw new Error(String(watched['error'] ?? 'The web chat page could not be prepared.'))
   const sent = await runScript(chrome, askScript(setup, question), pageId)
   if (Array.isArray(sent['needsActivity'])) {
@@ -128,9 +161,78 @@ export async function askWebChat(chrome: ChromeAccess, setup: WebChatSetup, ques
   const status = Number(sent['status'])
   if (status === 401 || status === 403) throw new Error(`The web chat answered HTTP ${String(status)}: sign in to it again in Chrome, then ask again.`)
   if (status >= 400) throw new Error(`The web chat answered HTTP ${String(status)}: ${String(sent['text'] ?? '').slice(0, 300)}`)
+  options.onReply?.(String(sent['text'] ?? ''))
   const answer = readAnswer(String(sent['text'] ?? ''), setup.response)
   if (answer === undefined || answer.trim().length === 0) {
     throw new Error('The answer was not where the capture found it - the web chat may have changed how it replies. Capture again in Settings → Agents → Web chat.')
   }
   return answer
+}
+
+/**
+ * The chat window method (`setup.method === 'window'`): the question is typed into the chat window and sent, as a person
+ * would, and the answer is read from the page's own reply to the approved backend (found by the watcher, `inpage.ts`).
+ * Light Code makes no request itself. When the page makes none the watcher can see (a WebSocket chat), the answer is
+ * read off the screen instead: the text the page shows afterwards that it did not show before, once it stops changing.
+ */
+export async function askThroughWindow(
+  chrome: ChromeAccess,
+  setup: WebChatSetup,
+  question: string,
+  options: { timeoutMs?: number; quietMs?: number; sleep?: (ms: number) => Promise<void>; onReply?: (text: string) => void } = {},
+): Promise<{ answer: string; from: 'reply' | 'screen' }> {
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  const timeout = options.timeoutMs ?? 300_000
+  const origin = new URL(setup.pageUrl).origin
+  const backend = setup.backendUrl ?? new URL(setup.request.path, origin).href
+  const pageId = await selectWebChatPage(chrome, setup.pageUrl)
+  const before = String((await runScript(chrome, pageTextScript(origin), pageId))['text'] ?? '')
+  const watched = await runScript(chrome, watchScript(origin, undefined, backend), pageId)
+  if (watched['ok'] !== true) throw new Error(String(watched['error'] ?? 'The web chat page could not be prepared.'))
+  const typed = await runScript(chrome, typeTextScript(origin, question), pageId)
+  if (typed['ok'] !== true) throw new Error(String(typed['error'] ?? 'The question could not be typed into the web chat.'))
+
+  const started = Date.now()
+  let lastText = ''
+  let stableSince = Date.now()
+  while (Date.now() - started < timeout) {
+    await sleep(1000)
+    const read = await runScript(chrome, readRepliesScript(origin), pageId)
+    const replies = Array.isArray(read['replies']) ? (read['replies'] as { status?: number; response?: string }[]) : []
+    const reply = replies.at(-1)
+    if (reply !== undefined) {
+      const status = Number(reply.status ?? 0)
+      if (status === 401 || status === 403) throw new Error(`The web chat answered HTTP ${String(status)}: sign in to it again in Chrome, then ask again.`)
+      if (status >= 400) throw new Error(`The web chat answered HTTP ${String(status)}: ${String(reply.response ?? '').slice(0, 300)}`)
+      options.onReply?.(String(reply.response ?? ''))
+      const answer = readAnswer(String(reply.response ?? ''), setup.response)
+      if (answer !== undefined && answer.trim().length > 0) return { answer, from: 'reply' }
+      throw new Error('The web chat replied, but not in the shape the capture found - it may have changed how it replies. Capture again in Settings → Agents → Web chat.')
+    }
+    // No request to the backend seen: read the screen, once the new text has stopped changing.
+    const waitingForRequest = Number(read['pending'] ?? 0) > 0
+    if (!waitingForRequest && Date.now() - started > 5000) {
+      const now = String((await runScript(chrome, pageTextScript(origin), pageId))['text'] ?? '')
+      if (now !== lastText) {
+        lastText = now
+        stableSince = Date.now()
+      } else if (Date.now() - stableSince >= (options.quietMs ?? 4000)) {
+        const added = newText(before, now, question)
+        if (added.length > 0) return { answer: added, from: 'screen' }
+      }
+    }
+  }
+  throw new Error(`No answer from the web chat within ${String(Math.round(timeout / 1000))} seconds. Look at the web chat tab in Chrome.`)
+}
+
+/** What a page shows now that it did not before, after the question itself. */
+export function newText(before: string, after: string, question: string): string {
+  let start = 0
+  while (start < before.length && start < after.length && before[start] === after[start]) start += 1
+  let added = after.slice(start)
+  const q = question.trim()
+  // The first time the question appears is the user's own message; an answer may repeat it, so never the last.
+  const at = q.length > 0 ? added.indexOf(q) : -1
+  if (at >= 0) added = added.slice(at + q.length)
+  return added.trim()
 }

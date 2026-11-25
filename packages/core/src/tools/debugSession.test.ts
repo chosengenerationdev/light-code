@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { createReadDebugSessionTool, renderDebugSnapshot, type DebugSessionSnapshot } from './debugSession.js'
+import { createEvaluateInDebugSessionTool, createReadDebugSessionTool, renderDebugSnapshot, type DebugSessionSnapshot } from './debugSession.js'
 import type { ToolExecutionContext } from './types.js'
 
 const NO_CONTEXT = {} as unknown as ToolExecutionContext
@@ -90,5 +90,39 @@ describe('read_debug_session', () => {
   it('says when no console output has been captured yet', () => {
     const snapshot: DebugSessionSnapshot = { sessionName: 'Launch', sessionType: 'python', recentOutput: [] }
     expect(renderDebugSnapshot(snapshot)).toContain('No console output captured yet.')
+  })
+})
+
+describe('reading a DataFrame or a complex object', () => {
+  const base: DebugSessionSnapshot = { sessionName: 'Python: app.py', sessionType: 'python', stopped: { reason: 'breakpoint', frames: [] }, recentOutput: [] }
+
+  it('asks the host to open the named variable, and shows its children', async () => {
+    let asked: unknown
+    const tool = createReadDebugSessionTool({
+      read: async (request) => {
+        asked = request
+        return { ...base, expanded: { path: 'df', frame: 0, lines: ['df: DataFrame = <3 rows x 2 columns>', '  price: Series = ...', '  qty: Series = ...'] } }
+      },
+    })
+    const result = await tool.execute({ expand: 'df' }, {} as ToolExecutionContext)
+    expect(asked).toEqual({ expand: 'df' })
+    expect(result.content).toContain('df (frame 0), opened through the debugger:')
+    expect(result.content).toContain('  price: Series = ...')
+  })
+
+  it('evaluates only with approval of the literal expression, and shows the value', async () => {
+    const tool = createEvaluateInDebugSessionTool({ evaluate: async () => ({ ok: true, result: '   price  qty\n0   1.5    2', type: 'str' }) })
+    expect(tool.group).toBe('command')
+    const preview = await tool.preview?.({ expression: 'df.head().to_string()' }, {} as ToolExecutionContext)
+    expect(preview).toMatchObject({ kind: 'command', command: 'df.head().to_string()' })
+    const result = await tool.execute({ expression: 'df.head().to_string()' }, {} as ToolExecutionContext)
+    expect(result.content).toContain('df.head().to_string() (str) =\n   price  qty')
+  })
+
+  it('says so when nothing is paused', async () => {
+    const tool = createEvaluateInDebugSessionTool({ evaluate: async () => undefined })
+    const result = await tool.execute({ expression: 'x' }, {} as ToolExecutionContext)
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('Nothing is paused')
   })
 })

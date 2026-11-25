@@ -102,6 +102,18 @@ export class ObserverAgent {
     this.launch(undefined)
   }
 
+  /**
+   * An event every process of this observer must have, whatever came before it: sent now, and first to each process
+   * started later - after a handoff, a crash or a restart. The codebase's memory is one (asked: "when anti halucinator
+   * starts, will it read the full memory to context?"); a handoff carries only the observer's own notes, so without
+   * this a new process would not know the memory until it changed. `undefined` clears it.
+   */
+  pin(event: ObservedEvent | undefined): void {
+    this.pinned = event
+    if (event !== undefined) this.send(event)
+  }
+  private pinned: ObservedEvent | undefined
+
   /** `quiet`: the decision model's first pass was sure of this step - kept in context, reviewed with the next one. */
   send(event: ObservedEvent, quiet = false): void {
     if (this.stopped) return
@@ -239,7 +251,10 @@ export class ObserverAgent {
       model: this.options.model,
       handoff: this.handoffText(),
     })
-    const waiting = [...(pending ?? []), ...this.buffered]
+    // The pinned event first, then what the last process had not reviewed. A copy of it may also be in `buffered`
+    // (sent while no process was running); that one is dropped rather than sent twice.
+    if (this.pinned !== undefined) this.writeTo(child, { type: 'event', event: this.pinned })
+    const waiting = [...(pending ?? []), ...this.buffered].filter((event) => event !== this.pinned)
     this.buffered = []
     for (const event of waiting) this.writeTo(child, { type: 'event', event })
   }

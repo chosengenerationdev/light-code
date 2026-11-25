@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import type { DebugSessionSnapshot, DebugStackFrame } from '@light-code/core'
+import type { DebugEvaluation, DebugReadRequest, DebugSessionSnapshot, DebugStackFrame } from '@light-code/core'
 
 /**
  * Watching every VS Code debug session for its console output and paused/running state.
@@ -120,6 +120,7 @@ interface DapVariable {
   name: string
   value: string
   type?: string
+  variablesReference?: number
 }
 
 /**
@@ -127,7 +128,7 @@ interface DapVariable {
  * the only session a chat running alongside it can mean without asking. There is no
  * `sessionId` parameter to resolve against anything else.
  */
-export async function readDebugSession(): Promise<DebugSessionSnapshot | undefined> {
+export async function readDebugSession(request: DebugReadRequest = {}): Promise<DebugSessionSnapshot | undefined> {
   const session = vscode.debug.activeDebugSession
   if (session === undefined) return undefined
 
@@ -198,6 +199,115 @@ export async function readDebugSession(): Promise<DebugSessionSnapshot | undefin
       ...(entry.stopped.description !== undefined ? { description: entry.stopped.description } : {}),
       frames,
     },
+    ...(request.expand !== undefined && request.expand.trim() !== ''
+      ? { expanded: await expandVariable(session, entry.stopped.threadId, request.expand.trim(), request.frame ?? 0, request.depth ?? 2) }
+      : {}),
     recentOutput: [...entry.output],
   }
+}
+
+const MAX_EXPANDED_LINES = 300
+const MAX_CHILDREN = 100
+
+type Request = (command: string, args: Record<string, unknown>) => Promise<unknown>
+
+/** The DAP request function for a session, as a real Promise (VS Code's Thenable has no `.catch`). */
+function requester(session: vscode.DebugSession): Request {
+  return (command, args) => Promise.resolve(session.customRequest(command, args))
+}
+
+async function frameId(ask: Request, threadId: number, frame: number): Promise<number | undefined> {
+  const stack = (await ask('stackTrace', { threadId, startFrame: frame, levels: 1 }).catch(() => ({}))) as { stackFrames?: DapStackFrame[] }
+  return stack.stackFrames?.[0]?.id
+}
+
+async function children(ask: Request, reference: number): Promise<DapVariable[]> {
+  const answer = (await ask('variables', { variablesReference: reference }).catch(() => ({}))) as { variables?: DapVariable[] }
+  return answer.variables ?? []
+}
+
+/** A variable's children as indented lines, `depth` levels deep, through DAP `variables` alone - nothing is run. */
+async function renderChildren(ask: Request, reference: number, depth: number, indent: string, lines: string[]): Promise<void> {
+  const list = await children(ask, reference)
+  for (const child of list.slice(0, MAX_CHILDREN)) {
+    if (lines.length >= MAX_EXPANDED_LINES) {
+      lines.push(`${indent}… (more not shown)`)
+      return
+    }
+    lines.push(`${indent}${child.name}${child.type !== undefined ? `: ${child.type}` : ''} = ${child.value}`)
+    if (depth > 1 && (child.variablesReference ?? 0) > 0) await renderChildren(ask, child.variablesReference ?? 0, depth - 1, `${indent}  `, lines)
+  }
+  if (list.length > MAX_CHILDREN) lines.push(`${indent}… ${String(list.length - MAX_CHILDREN)} more`)
+}
+
+/**
+ * `read_debug_session`'s `expand`: a variable found by a dotted path ("df", "result.items") in a frame's scopes, and its
+ * children a few levels deep - a DataFrame's columns, an object's attributes. Read through the debugger only.
+ */
+async function expandVariable(
+  session: vscode.DebugSession,
+  threadId: number,
+  path: string,
+  frame: number,
+  depth: number,
+): Promise<NonNullable<DebugSessionSnapshot['expanded']>> {
+  const ask = requester(session)
+  const id = await frameId(ask, threadId, frame)
+  if (id === undefined) return { path, frame, lines: [], error: `There is no frame ${String(frame)} in the call stack.` }
+  const scopes = ((await ask('scopes', { frameId: id }).catch(() => ({}))) as { scopes?: DapScope[] }).scopes ?? []
+  const [first, ...rest] = path.split('.')
+  let found: DapVariable | undefined
+  // Cheap scopes first; a large globals scope only when the name is not in the others.
+  for (const scope of [...scopes.filter((s) => s.expensive !== true), ...scopes.filter((s) => s.expensive === true)]) {
+    found = (await children(ask, scope.variablesReference)).find((variable) => variable.name === first)
+    if (found !== undefined) break
+  }
+  if (found === undefined) return { path, frame, lines: [], error: `No variable named "${first ?? ''}" in frame ${String(frame)}.` }
+  for (const part of rest) {
+    const inside: DapVariable[] = (found.variablesReference ?? 0) > 0 ? await children(ask, found.variablesReference ?? 0) : []
+    const next: DapVariable | undefined = inside.find((variable) => variable.name === part || variable.name === `'${part}'` || variable.name === `"${part}"`)
+    if (next === undefined) return { path, frame, lines: [], error: `"${part}" is not inside ${found.name}. It has: ${inside.slice(0, 30).map((v) => v.name).join(', ')}` }
+    found = next
+  }
+  const lines = [`${path}${found.type !== undefined ? `: ${found.type}` : ''} = ${found.value}`]
+  if ((found.variablesReference ?? 0) > 0) await renderChildren(ask, found.variablesReference ?? 0, depth, '  ', lines)
+  return { path, frame, lines }
+}
+
+/** A Python (or JS) string literal as its text: debuggers show a string's value quoted and escaped. */
+export function unquote(value: string): string {
+  const match = /^(?:[rRbBuU]?)(['"])([\s\S]*)\1$/.exec(value.trim())
+  if (match === null) return value
+  return (match[2] ?? '').replace(/\\(n|t|r|\\|'|")/g, (_all, code: string) => (code === 'n' ? '\n' : code === 't' ? '\t' : code === 'r' ? '' : code))
+}
+
+/**
+ * `evaluate_in_debug_session`: an expression evaluated in a frame of the paused thread. The `clipboard` context first -
+ * debuggers that support it give the whole value there, not a shortened one - then `repl`. Undefined when nothing is
+ * paused.
+ */
+export async function evaluateInDebugSession(request: { expression: string; frame?: number }): Promise<DebugEvaluation | undefined> {
+  const session = vscode.debug.activeDebugSession
+  if (session === undefined) return undefined
+  const stopped = bufferFor(session.id).stopped
+  if (stopped === undefined) return undefined
+  const ask = requester(session)
+  const id = await frameId(ask, stopped.threadId, request.frame ?? 0)
+  if (id === undefined) return { ok: false, error: `There is no frame ${String(request.frame ?? 0)} in the call stack.` }
+  let answer: { result?: string; type?: string; variablesReference?: number } | undefined
+  let failure = ''
+  for (const context of ['clipboard', 'repl']) {
+    try {
+      answer = (await ask('evaluate', { expression: request.expression, frameId: id, context })) as typeof answer
+      break
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error)
+    }
+  }
+  if (answer === undefined) return { ok: false, error: failure || 'The debugger gave no answer.' }
+  const raw = answer.result ?? ''
+  const result = answer.type === 'str' || answer.type === 'string' ? unquote(raw) : raw
+  const lines: string[] = []
+  if ((answer.variablesReference ?? 0) > 0 && answer.type !== 'str') await renderChildren(ask, answer.variablesReference ?? 0, 1, '  ', lines)
+  return { ok: true, result: result.length > 60_000 ? `${result.slice(0, 60_000)}\n… (cut at 60,000 characters)` : result, ...(answer.type !== undefined ? { type: answer.type } : {}), ...(lines.length > 0 ? { children: lines } : {}) }
 }

@@ -1,7 +1,7 @@
 import { redact } from '../logging/redact.js'
 import type { RiskyCommandRule } from '../approval/riskyCommands.js'
 import type { AuditIndex } from './auditIndex.js'
-import { auditVerdict, capEvent, dangerSignals, guardVerdict, type GuardVerdict, type ObservedEvent } from './events.js'
+import { auditVerdict, capEvent, dangerSignals, guardMemory, guardVerdict, type GuardVerdict, type ObservedEvent } from './events.js'
 import { AuditJournal, type AuditRecord } from './journal.js'
 import type { ObserverAgent, ObserverRole, ObserverStatus } from './process.js'
 
@@ -46,6 +46,12 @@ export interface ObserverHubDeps {
    * Undefined (or an answer of false/undefined) means review as always.
    */
   firstPass?: (step: readonly ObservedEvent[], goal: string) => Promise<boolean | undefined>
+  /**
+   * The codebase's memory (memory/store.ts): `remember` keeps the points the Anti Hallucinator proposes, with the
+   * user's message they came from; `memoryUsed` counts the entries (1-based, as shown) a note rested on.
+   */
+  remember?: (points: string[], from: string) => void
+  memoryUsed?: (numbers: number[]) => void
 }
 
 /** A step ends at these events; the Anti Hallucinator reviews then. */
@@ -175,6 +181,8 @@ export class ObserverHub {
     } else {
       this.guard = started
       this.guardProblem = undefined
+      // The memory goes first to this process and every process it is replaced by.
+      if (this.memoryText !== undefined) started.pin({ kind: 'memory', at: Date.now(), text: this.memoryText })
     }
     started.start()
   }
@@ -195,9 +203,23 @@ export class ObserverHub {
       }
     }
     // The decision model's own records are for the audit, not for the Anti Hallucinator to review.
-    if (guard.enabled && event.kind !== 'decision') this.toGuard(event)
+    if (guard.enabled && event.kind !== 'decision' && event.kind !== 'behind') this.toGuard(event)
     // The end of a turn is when the auditor's batch is due and the guard has the whole step.
     if (event.kind === 'turnEnd') this.auditor?.flush()
+  }
+
+  /** The memory as last given (`setMemory`); the user's latest request. */
+  private memoryText: string | undefined
+  private lastUserText = ''
+
+  /**
+   * The codebase's memory, numbered, for the Anti Hallucinator: pinned to it (`ObserverAgent.pin`), so it is sent now
+   * when it changed, and first to every process it starts later - after a handoff, a crash or a restart.
+   */
+  setMemory(text: string | undefined): void {
+    if (text === this.memoryText) return
+    this.memoryText = text
+    this.guard?.pin(text === undefined ? undefined : { kind: 'memory', at: Date.now(), text })
   }
 
   /** Events since the Anti Hallucinator's last step, and the request it is checking against. */
@@ -214,6 +236,7 @@ export class ObserverHub {
    * that needs one rather than on its own. A helper that predates `quiet` reviews it anyway, as before.
    */
   private toGuard(event: ObservedEvent): void {
+    if (event.kind === 'turnStart') this.lastUserText = event.text
     const firstPass = this.deps.firstPass
     if (firstPass === undefined) {
       this.guard?.send(event)
@@ -291,6 +314,9 @@ export class ObserverHub {
       else if (verdict.risk === 'high') this.alert('high', verdict.concerns[0] ?? verdict.summary, 'auditor', true)
       return
     }
+    const memory = guardMemory(reply)
+    if (memory.remember.length > 0) this.deps.remember?.(memory.remember, this.lastUserText)
+    if (memory.applied.length > 0) this.deps.memoryUsed?.(memory.applied)
     const note = guardVerdict(reply)
     if (note === undefined) return
     // The same note twice in a row is a reviewer repeating itself, not new information.
@@ -376,6 +402,7 @@ function redactEvent(event: ObservedEvent, secrets: readonly string[]): Observed
     case 'turnStart':
     case 'reasoning':
     case 'assistant':
+    case 'memory':
       return { ...event, text: r(event.text) }
     case 'toolCall':
       return { ...event, args: r(event.args) }
@@ -389,5 +416,9 @@ function redactEvent(event: ObservedEvent, secrets: readonly string[]): Observed
       return event.error === undefined ? event : { ...event, error: r(event.error) }
     case 'decision':
       return { ...event, question: r(event.question), outcome: r(event.outcome) }
+    case 'consultation':
+      return event
+    case 'behind':
+      return { ...event, summary: r(event.summary) }
   }
 }

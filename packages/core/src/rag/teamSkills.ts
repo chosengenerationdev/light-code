@@ -90,6 +90,8 @@ export interface TeamSkillHit {
   score: number
   /** True when this is the current machine's own copy. */
   isMine: boolean
+  /** The reranker's score, when one put this in order. */
+  relevance?: number
 }
 
 function nameFromPath(path: string): string {
@@ -317,7 +319,8 @@ export function renderTeamSkillHits(found: TeamSkillSearchResult, query: string,
     .map((hit, position) => {
       const who = hit.isMine ? 'yours' : (hit.owner ?? 'unknown owner')
       const where = hit.project === undefined ? who : `${who} / ${hit.project}`
-      return `[${position + 1}] ${hit.name}  (${where})\n${hit.text}`
+      const relevance = hit.relevance !== undefined ? `, relevance ${hit.relevance.toFixed(3)}` : ''
+      return `[${position + 1}] ${hit.name}  (${where}${relevance})\n${hit.text}`
     })
     .join('\n\n---\n\n')
 

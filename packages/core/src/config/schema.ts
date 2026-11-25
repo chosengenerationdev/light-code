@@ -156,6 +156,8 @@ export const agentAssignmentSchema = z
     /** `cli` is the Claude command line; `profile` names one of the user's provider profiles. */
     kind: z.enum(['cli', 'profile']),
     profileId: z.string().optional(),
+    /** A model from that profile's provider for this role, when not the profile's own (providers/seat.ts). */
+    model: z.string().min(1).max(200).optional(),
     /**
      * The role's system prompt, stored only when the user has edited it.
      *
@@ -843,6 +845,8 @@ const observerAgentConfigSchema = z
     enabled: z.boolean(),
     /** Which provider profile answers. Its auth, certificates and headers are used exactly as for the chat. */
     profileId: z.string().min(1),
+    /** A model from that provider, when not the profile's own (providers/seat.ts). */
+    model: z.string().min(1).max(200),
     /**
      * The user's own instructions, replacing the shipped ones (`observers/prompts.ts`). The reply format and the
      * running-notes rule are always appended after them, so an edit cannot break parsing or the handoff.
@@ -866,7 +870,13 @@ export const observersConfigSchema = z
         retentionDays: z.number().int().min(1).max(3650),
       })
       .partial(),
-    antiHallucination: observerAgentConfigSchema,
+    antiHallucination: observerAgentConfigSchema.extend({
+      /**
+       * The codebase's memory (memory/store.ts), on unless false: the Anti Hallucinator keeps the user's lasting
+       * corrections and guidance, every chat's agent is given them, and it redirects the agent with them.
+       */
+      memory: z.boolean(),
+    }).partial(),
   })
   .partial()
 export type ObserversConfig = z.infer<typeof observersConfigSchema>
@@ -1532,6 +1542,13 @@ export const configSchema = z
      */
     composerCompletion: z.boolean(),
     /**
+     * Which provider profile suggests, when not the chat's own - a small, fast model. Reported: a large model
+     * (a large Gemini model) never produced its first words within the time limit, so no suggestion ever appeared.
+     */
+    composerCompletionProfileId: z.string().min(1),
+    /** A model from that provider for suggestions, when not the profile's own. */
+    composerCompletionModel: z.string().min(1).max(200),
+    /**
      * The decision model (D3 from vLLM Semantic Router, or any OpenAI-compatible model that returns probabilities): a
      * provider profile, and what it decides. Nothing here does anything until `profileId` names a profile - Agent team
      * and strategies then work exactly as before. `routing`: in Agent team mode, send each message to the specialist
@@ -1541,6 +1558,8 @@ export const configSchema = z
     decisionModel: z
       .object({
         profileId: z.string().min(1).optional(),
+        /** A model from that profile's provider, when not the profile's own (providers/seat.ts). */
+        model: z.string().min(1).max(200).optional(),
         /**
          * Where on the profile's base URL it is asked: blank = automatic (D3's `/systemone`, then chat completions),
          * a path such as `/d3/v1/systemone` (D3's API there, no fallback), or `chat` (chat completions only).
@@ -1563,6 +1582,28 @@ export const configSchema = z
         triageAlerts: z.boolean().optional(),
         /** The skill-and-tool picks (switched on per chat, beside the chat): an option is suggested at this or above (0.25). */
         suggestThreshold: z.number().min(0.05).max(0.95).optional(),
+      })
+      .optional(),
+    /**
+     * The reranker (a cross-encoder such as bge-reranker-v2-m3, rerank/rerank.ts): a provider profile whose server answers
+     * `/v1/rerank`, `/rerank` or `/v1/score`. Nothing here does anything until `profileId` names a profile. It reorders
+     * what a search found and drops what scores below `minScore` (0.05). `candidates`: how many it is given to reorder
+     * (30). `docs` (tool and skill search, `search_docs`), `teamSkills`, `codebase` and `picks` (narrowing the decision
+     * model's skill-and-tool picks to the best few) are on unless false. User-scope only: it is sent the query and the
+     * texts searched - skill descriptions and code.
+     */
+    reranker: z
+      .object({
+        profileId: z.string().min(1).optional(),
+        /** A model from that profile's provider, when not the profile's own (providers/seat.ts). */
+        model: z.string().min(1).max(200).optional(),
+        endpoint: z.string().max(200).optional(),
+        minScore: z.number().min(0).max(0.95).optional(),
+        candidates: z.number().int().min(5).max(200).optional(),
+        docs: z.boolean().optional(),
+        teamSkills: z.boolean().optional(),
+        codebase: z.boolean().optional(),
+        picks: z.boolean().optional(),
       })
       .optional(),
     /**

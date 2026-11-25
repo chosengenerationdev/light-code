@@ -47,6 +47,22 @@ const connection = { url: 'https://search.corp.example:9200' }
 const ownedMapping = { idx: { mappings: { _meta: { createdBy: OWNED_INDEX_MARKER } } } }
 
 describe('Embedder', () => {
+  // Reported: agents stopped on "invalid request ... model not allowed" from the embedding gateway, which came and went.
+  it('asks again when the endpoint fails, and gives up after two retries', async () => {
+    let calls = 0
+    const { client } = http(() => {
+      calls += 1
+      return calls < 3 ? { status: 400, payload: { error: { type: 'invalid_request_error', message: 'model not allowed' } } } : { payload: { data: [{ index: 0, embedding: [0.5] }] } }
+    })
+    const embedder = new Embedder(client, { profile, auth: new NoAuthStrategy(), model: 'e', dimensions: 1 })
+    embedder.retryDelaysMs = [0, 0]
+    expect(await embedder.embed('hello')).toEqual([0.5])
+    expect(calls).toBe(3)
+
+    calls = -10
+    await expect(embedder.embed('again')).rejects.toThrow(/HTTP 400/)
+  })
+
   it('posts to the profile base URL and returns the vector', async () => {
     const { client, calls } = http(() => ({ payload: { data: [{ index: 0, embedding: [0.1, 0.2, 0.3] }] } }))
     const embedder = new Embedder(client, { profile, auth: new NoAuthStrategy(), model: 'embed-1', dimensions: 3 })

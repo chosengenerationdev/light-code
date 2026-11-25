@@ -57,20 +57,27 @@ export function ModelSelect(props: ModelSelectProps): ReactElement {
         </button>
       </div>
 
-      {props.models.length > 0 && (
-        <Select
-          ariaLabel="Choose from the gateway's catalogue"
-          value={props.models.includes(props.value) ? props.value : ''}
-          onChange={(value) => {
-            if (value.length > 0) props.onChange(value)
-          }}
-          style={{ width: '100%' }}
-          options={[
-            { value: '', label: `Choose from ${props.models.length} available model(s)…` },
-            ...props.models.map((id) => ({ value: id, label: id })),
-          ]}
-        />
-      )}
+      {/* Always shown: the list loads by itself, and the box says so while it does or when there is none. */}
+      <Select
+        ariaLabel="Choose from the gateway's catalogue"
+        value={props.models.includes(props.value) ? props.value : ''}
+        onChange={(value) => {
+          if (value.length > 0) props.onChange(value)
+        }}
+        style={{ width: '100%' }}
+        options={[
+          {
+            value: '',
+            label:
+              props.models.length > 0
+                ? `Choose from ${props.models.length} available model(s)…`
+                : props.loading
+                  ? 'Loading the list of models…'
+                  : 'No list yet - fill in the address and key, or type a model name above',
+          },
+          ...props.models.map((id) => ({ value: id, label: id })),
+        ]}
+      />
 
       {props.warning !== undefined && props.models.length === 0 && (
         <span style={{ ...fieldErrorStyle(), color: colors.muted }}>{props.warning}</span>

@@ -69,4 +69,52 @@ describe('Settings → Agents → Web chat', () => {
     expect(container.textContent).toContain('"chrome-devtools" cannot be used for the web chat yet')
     expect(container.textContent).toContain('With npx the version must be pinned.')
   })
+
+  // Asked for: "provide a test button to verify both primary way and backup way".
+  it('tests both ways and shows each result', () => {
+    const { container, sent, deliver } = mount()
+    deliver({
+      type: 'webChat',
+      available: true,
+      chrome: { servers: [{ name: 'chrome-webchat', problems: [] }], chosen: 'chrome-webchat' },
+      setup: { pageUrl: 'https://ai-chat.example.internal/', backend: 'https://api.example.internal/v1/chat', via: 'replay', method: 'POST', fromPage: [], capturedAt: '2026-11-21' },
+    })
+    act(() => button(container, 'Test both ways').click())
+    expect(sent.some((m) => m['type'] === 'testWebChat')).toBe(true)
+    expect(button(container, 'Test both ways').disabled).toBe(true)
+    expect(container.textContent).toContain('Direct to the approved address: asking…')
+    deliver({
+      type: 'webChatTest',
+      results: [
+        { way: 'direct', ok: false, text: 'The web chat answered HTTP 405.', ms: 800 },
+        { way: 'window', ok: true, text: 'ready', ms: 4200, from: 'reply' },
+      ],
+    })
+    const shown = container.querySelector('[data-testid="webchat-test"]')?.textContent ?? ''
+    expect(shown).toContain('Direct to the approved address: failed (0.8 s) - The web chat answered HTTP 405.')
+    expect(shown).toContain('Through the chat window: works (4.2 s) - ready')
+    expect(button(container, 'Test both ways').disabled).toBe(false)
+  })
+})
+
+describe('fixing the chosen server', () => {
+  // Asked for: "its tiring for me to go back and forth, can you fix these for good please".
+  it('offers to fix a server the web chat cannot use yet', () => {
+    const { container, sent, deliver } = mount()
+    deliver({ type: 'webChat', available: true, chrome: { servers: [{ name: 'chrome-webchat', problems: ['Its arguments must include --no-usage-statistics.'], fixable: true }], chosen: 'chrome-webchat' } })
+    act(() => button(container, 'Fix it for me').click())
+    expect(sent.find((m) => m['type'] === 'fixWebChatServer')).toEqual({ type: 'fixWebChatServer', server: 'chrome-webchat' })
+  })
+})
+
+describe('which Chrome', () => {
+  it('switches the chosen server between your own Chrome and one it starts', () => {
+    const { container, sent, deliver } = mount()
+    deliver({ type: 'webChat', available: true, chrome: { servers: [{ name: 'chrome-webchat', problems: [], mode: 'own' }], chosen: 'chrome-webchat' } })
+    expect(container.textContent).toContain('chrome://inspect/#remote-debugging')
+    act(() => (container.querySelector('[aria-label="Which Chrome the web chat uses"]') as HTMLButtonElement).click())
+    const option = [...document.querySelectorAll('[role="option"]')].find((el) => el.textContent?.includes('A Chrome it starts')) as HTMLElement
+    act(() => option.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })))
+    expect(sent.find((m) => m['type'] === 'setWebChatChrome')).toEqual({ type: 'setWebChatChrome', server: 'chrome-webchat', mode: 'started' })
+  })
 })

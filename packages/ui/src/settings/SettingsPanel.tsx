@@ -16,6 +16,9 @@ import { colors, fontFamily } from '../theme.js'
 import { ApprovalsTab, Toggle } from './ApprovalsTab.js'
 import { Panel } from './Panel.js'
 import { DecisionModelSection } from './DecisionModelSection.js'
+import { RerankerSection } from './RerankerSection.js'
+import { MemorySection } from './MemorySection.js'
+import { SuggestionModel } from './SuggestionModel.js'
 import { WebChatSection } from './WebChatSection.js'
 import { McpTab } from './McpTab.js'
 import { AgentsTab, type AgentsTabProps } from './AgentsTab.js'
@@ -405,16 +408,6 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <VariablesTab {...props.variables} />
         ) : shown === 'appearance' ? (
           <div style={{ padding: 12 }}>
-            {props.onSetComposerCompletion !== undefined && (
-              <Panel id="appearance.typing" title="Suggestions while typing" summary={props.composerCompletion === true ? 'On' : 'Off'} defaultOpen>
-                <Toggle
-                  checked={props.composerCompletion === true}
-                  label="Suggest how my message goes on"
-                  description="The chat's model suggests the rest of what you are typing, in grey. Tab takes the next word; Ctrl+Space, or Right arrow at the end, takes all of it; Esc hides it. Each pause in typing is a request to the model, sent to the same gateway as your chat."
-                  onChange={(enabled) => props.onSetComposerCompletion?.(enabled)}
-                />
-              </Panel>
-            )}
             <AppearanceSection
               accentColor={props.accentColor}
               onChangeAccent={props.onSetAccentColor}
@@ -487,7 +480,10 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             {...(props.commandShell !== undefined ? { shell: props.commandShell } : {})}
           />
         ) : shown === 'search' ? (
-          <SearchTab {...props.search} />
+          <>
+            <SearchTab {...props.search} />
+            {props.transport !== undefined && <RerankerSection transport={props.transport} />}
+          </>
         ) : shown === 'schedules' ? (
           <SchedulesTab {...props.schedules} />
         ) : shown === 'skills' ? (
@@ -511,6 +507,21 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             <ProjectTab {...props.project} />
             {props.transport !== undefined ? <TeamAdminsSection transport={props.transport} /> : null}
             {props.transport !== undefined ? <ObserversSection transport={props.transport} /> : null}
+            {props.transport !== undefined ? <MemorySection transport={props.transport} /> : null}
+            {/* Moved here from Appearance (asked for): which model suggests is a project choice, not a look. */}
+            <div style={{ padding: '0 12px 12px' }}>
+              {props.onSetComposerCompletion !== undefined && (
+                <Panel id="project.typing" title="Suggestions while typing" summary={props.composerCompletion === true ? 'On' : 'Off'} defaultOpen>
+                  <Toggle
+                    checked={props.composerCompletion === true}
+                    label="Suggest how my message goes on"
+                    description="A model suggests the rest of what you are typing, in grey. Tab takes the next word; Ctrl+Space, or Right arrow at the end, takes all of it; Esc hides it. Each pause in typing is a request to the model, sent to the same gateway as your chat."
+                    onChange={(enabled) => props.onSetComposerCompletion?.(enabled)}
+                  />
+                  {props.composerCompletion === true && props.transport !== undefined ? <SuggestionModel transport={props.transport} /> : null}
+                </Panel>
+              )}
+            </div>
           </>
         ) : shown === 'network' ? (
           <NetworkTab {...props.network} onBrowse={props.onBrowse} pickedPath={props.pickedPath} />
@@ -518,6 +529,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <>
           <AgentsTab
             {...props.agents}
+            {...(props.transport !== undefined ? { transport: props.transport } : {})}
             /*
              * The old Expert panel, nested rather than discarded.
              *

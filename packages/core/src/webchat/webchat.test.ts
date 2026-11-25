@@ -5,9 +5,10 @@ import vm from 'node:vm'
 import { describe, expect, it } from 'vitest'
 
 import type { McpServerConfig } from '../mcp/types.js'
-import { findAnswer, readAnswer } from './answer.js'
+import { findAnswer, readAnswer, replyShape } from './answer.js'
 import { candidatesFrom } from './capture.js'
-import { chromeServerProblems, webChatAddressProblem } from './guard.js'
+import { stdioCommandLine } from '../mcp/types.js'
+import { chromeMode, chromeServerProblems, fixChromeServer, webChatAddressProblem, withChromeMode } from './guard.js'
 import { askScript, readCaptureScript, scriptResult, watchScript } from './inpage.js'
 import { fillBody, type WebChatSetup } from './setup.js'
 import { createAskWebChatTool } from './tool.js'
@@ -38,13 +39,29 @@ describe('the rules that keep it inside the organisation', () => {
     expect(chromeServerProblems({ command: 'uvx', args: ['x', '--no-usage-statistics', '--no-performance-crux'] } as McpServerConfig).join(' ')).toContain('downloads the package each start')
   })
 
-  // Reported: "i already included that in the command" - arguments typed on one line arrive as one string.
-  it('reads the flags however the command line was typed', () => {
+  // Reported twice, and "tiring": options typed on one line. Measured against chrome-devtools-mcp's own parser, a line
+  // of several options passed as one argument is one unknown option - so they are split when the server is started
+  // (`stdioCommandLine`), and the check reads them the same way.
+  it('reads options typed on one line, or the whole command line in Command, as they will be started', () => {
     const oneLine = { command: 'npx', args: ['-y chrome-devtools-mcp@1.13.0 --autoConnect --no-usage-statistics --no-performance-crux'] } as McpServerConfig
     expect(chromeServerProblems(oneLine)).toEqual([])
     const wholeLine = { command: 'npx -y chrome-devtools-mcp@1.13.0 --autoConnect --no-usage-statistics --no-performance-crux' } as McpServerConfig
     expect(chromeServerProblems(wholeLine)).toEqual([])
-    expect(chromeServerProblems({ command: 'npx', args: ['-y chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux'] } as McpServerConfig).join(' ')).toContain('must be pinned')
+    expect(stdioCommandLine(wholeLine as { command: string })).toEqual({ command: 'npx', args: ['-y', 'chrome-devtools-mcp@1.13.0', '--autoConnect', '--no-usage-statistics', '--no-performance-crux'] })
+    // Quotes or a backslash: a path with a space in it, passed exactly as typed.
+    expect(stdioCommandLine({ command: 'node', args: ['C:\\Program Files\\x\\server.js', '--root "my folder"'] })).toEqual({ command: 'node', args: ['C:\\Program Files\\x\\server.js', '--root "my folder"'] })
+    expect(chromeServerProblems({ command: '"C:\\Program Files\\nodejs\\chrome-devtools-mcp.cmd"', args: ['--autoConnect', '--no-usage-statistics', '--no-performance-crux'] } as McpServerConfig)).toEqual([])
+  })
+
+  it('fixes an entry the web chat cannot use yet', () => {
+    const fixed = fixChromeServer({ command: 'npx', args: ['chrome-devtools-mcp@latest --autoConnect'] } as McpServerConfig)
+    expect(fixed).toEqual({ command: 'npx', args: ['-y', 'chrome-devtools-mcp@1.13.0', '--autoConnect', '--no-usage-statistics', '--no-performance-crux'] })
+    // Which Chrome is left as it was: --autoConnect is not added (it needs remote debugging switched on in the person's Chrome).
+    expect(chromeServerProblems(fixed)).toEqual([])
+    expect(fixChromeServer({ command: 'chrome-devtools-mcp' } as McpServerConfig)).toEqual({ command: 'chrome-devtools-mcp', args: ['--no-usage-statistics', '--no-performance-crux'] })
+    // A remote server, or a Chrome on another computer, is not fixed by adding options.
+    expect(fixChromeServer({ url: 'https://mcp.example.com/chrome' } as McpServerConfig)).toBeUndefined()
+    expect(fixChromeServer({ command: 'chrome-devtools-mcp', args: ['--browserUrl=http://10.1.2.3:9222'] } as McpServerConfig)).toBeUndefined()
   })
 
   it('refuses a remote server, missing flags, and a Chrome elsewhere', () => {
@@ -105,10 +122,22 @@ describe('the capture: only an approved backend on the same site', () => {
     expect(candidate.answerPreview).toBe('I do not understand that phrase.')
   })
 
-  it('never offers a request to another site', () => {
-    const { candidates, refused } = candidatesFrom([{ url: 'https://generativelanguage.googleapis.com/v1/chat', ...request }], PAGE, MARKER)
-    expect(candidates).toEqual([])
-    expect(refused[0]).toContain('on another site')
+  // Reported: "POST <url> on another site than the web chat ... so it is not used" - once approved it is used directly, the chat window as fallback.
+  it('offers a backend on another site, used directly once approved', () => {
+    const { candidates } = candidatesFrom([{ url: 'https://api.chat.example.internal/v2/conversations/8f3a9c2e41d7/messages', ...request }], PAGE, MARKER)
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0]).toMatchObject({ window: true, backend: 'https://api.chat.example.internal/v2/conversations/8f3a9c2e41d7/messages' })
+    expect(candidates[0]?.setup).toMatchObject({ method: 'replay', backendUrl: 'https://api.chat.example.internal/v2/conversations/8f3a9c2e41d7/messages' })
+    const same = candidatesFrom([{ url: 'https://ai-chat.example.internal/api/chat', ...request }], PAGE, MARKER).candidates[0]
+    expect(same).toMatchObject({ window: false, setup: { method: 'replay' } })
+  })
+
+  it('reads off the screen what appeared after the question', async () => {
+    const { newText } = await import('./chrome.js')
+    expect(newText('Chat\nYou: hi\nBot: hello', 'Chat\nYou: hi\nBot: hello\nYou: Is it fine?\nBot: Yes, it is.', 'Is it fine?')).toBe('Bot: Yes, it is.')
+    expect(newText('same', 'same', 'q')).toBe('')
+    // An answer that repeats the question keeps its whole text.
+    expect(newText('', 'You: 2 + 2?\nBot: 2 + 2? It is 4.', '2 + 2?')).toBe('Bot: 2 + 2? It is 4.')
   })
 
   it('writes a question into the body safely, and the model chosen over the captured one', () => {
@@ -261,5 +290,77 @@ describe('Chrome as chrome-devtools-mcp 1.13.0 answers', () => {
   it('takes a reply that mentions the phrase as the answer, not some other field', () => {
     const reply = JSON.stringify({ id: 'r1', reply: `I am not sure what ${MARKER} means.` })
     expect(findAnswer(reply, 'application/json', MARKER)?.answer).toBe(`I am not sure what ${MARKER} means.`)
+  })
+})
+
+/*
+ * Reported from real use: the Test button answered "chat_idprogressprogresscompletionparty_endcontext_usagefinish" both
+ * ways - the events' `type` values joined, which "the longest text" had taken for the answer over the short real one.
+ */
+describe('a reply whose events are labelled by type', () => {
+  const event = (value: object): string => `data: ${JSON.stringify(value)}\n\n`
+  const reply = (answer: string[]): string =>
+    event({ type: 'chat_id', chat_id: '7c1e9a2b' }) +
+    answer.map((text) => event({ type: 'progress', delta: text })).join('') +
+    event({ type: 'completion', status: 'done' }) +
+    event({ type: 'party_end' }) +
+    event({ type: 'context_usage', used: '1234' }) +
+    event({ type: 'finish', reason: 'stop' })
+
+  it('finds the text, never the labels', () => {
+    const found = findAnswer(reply(['I do not ', 'understand that.']), 'text/event-stream', 'light-code-capture-abc')
+    expect(found?.answer).toBe('I do not understand that.')
+    expect(found?.spec).toEqual({ kind: 'sse', path: ['delta'], mode: 'delta' })
+  })
+
+  it('reads a capture saved with the labels afresh, so it need not be captured again', () => {
+    expect(readAnswer(reply(['ready']), { kind: 'sse', path: ['type'], mode: 'delta' })).toBe('ready')
+  })
+
+  it('takes the whole answer once when deltas are followed by all of it', () => {
+    const text = event({ part: 'Hello ' }) + event({ part: 'there.' }) + event({ part: 'Hello there.' })
+    expect(findAnswer(text, 'text/event-stream', 'x')?.answer).toBe('Hello there.')
+  })
+
+  it('describes the reply without its text', () => {
+    const shape = replyShape(reply(['secret answer text']))
+    expect(shape).toContain('type ×6')
+    expect(shape).toContain('event labels')
+    expect(shape).not.toContain('secret')
+  })
+})
+
+describe('the check and the launch read a server the same way', () => {
+  // The check reading arguments one way and the launch another is what made "it says the flag is missing" and "the
+  // flag is ignored" both happen. Both go through `stdioCommandLine`.
+  it('starts stdio servers through stdioCommandLine', () => {
+    const client = readFileSync(path.join(__dirname, '..', 'mcp', 'client.ts'), 'utf8')
+    expect(client).toMatch(/const line = stdioCommandLine\(config\)[\s\S]{0,200}command: line\.command/)
+    const guard = readFileSync(path.join(__dirname, 'guard.ts'), 'utf8')
+    expect(guard).toContain('stdioCommandLine({ command: record.command')
+  })
+})
+
+// Reported: "could not find DevToolsActivePort" once --autoConnect really applied - it needs remote debugging on in the
+// person's Chrome. "Which Chrome" switches between their own Chrome and one the server starts.
+describe('which Chrome the web chat uses', () => {
+  const entry = { command: 'npx', args: ['-y', 'chrome-devtools-mcp@1.13.0', '--autoConnect --no-usage-statistics --no-performance-crux'] } as McpServerConfig
+  it('reads and changes it', () => {
+    expect(chromeMode(entry)).toBe('own')
+    const started = withChromeMode(entry, 'started')
+    expect(started).toEqual({ command: 'npx', args: ['-y', 'chrome-devtools-mcp@1.13.0', '--no-usage-statistics', '--no-performance-crux'] })
+    expect(chromeMode(started)).toBe('started')
+    expect(chromeServerProblems(started)).toEqual([])
+    expect(chromeMode(withChromeMode(started!, 'own'))).toBe('own')
+    const byAddress = { command: 'chrome-devtools-mcp', args: ['--browserUrl=http://127.0.0.1:9222'] } as McpServerConfig
+    expect(chromeMode(byAddress)).toBe('address')
+    expect(withChromeMode(byAddress, 'own')).toBeUndefined()
+  })
+
+  it('says what to do when the own Chrome is not accepting it', async () => {
+    const { explainChromeError } = await import('./chrome.js')
+    const text = explainChromeError('Could not connect to Chrome. Check if Chrome is running and remote debugging is enabled by going to chrome://inspect/#remote-debugging. Could not find DevToolsActivePort')
+    expect(text).toContain('chrome://inspect/#remote-debugging')
+    expect(text).toContain('A Chrome it starts')
   })
 })

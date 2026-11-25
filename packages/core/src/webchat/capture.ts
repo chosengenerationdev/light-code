@@ -12,6 +12,7 @@ export interface CapturedRequest {
   method: string
   headers: Record<string, string>
   body: string
+  credentials?: string
   status?: number
   contentType?: string
   response?: string
@@ -27,6 +28,8 @@ export interface CaptureCandidate {
   answerPreview: string
   /** Credential headers taken from the page each time, by name. */
   fromPage: string[]
+  /** The backend is on another site than the chat page (sent to directly once approved; the chat window if refused). */
+  window: boolean
   setup: WebChatSetup
 }
 
@@ -51,10 +54,8 @@ export function candidatesFrom(found: readonly CapturedRequest[], pageUrl: strin
       refused.push(`${entry.url}: not an address.`)
       continue
     }
-    if (url.origin !== origin) {
-      refused.push(`${entry.method} ${entry.url}: on another site than the web chat (${origin}), so it is not used.`)
-      continue
-    }
+    // On another site: never sent to by Light Code - offered as the chat window method instead (see setup.ts).
+    const window = url.origin !== origin
     const contentType = Object.entries(entry.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1]
     const template = bodyTemplate(entry.body, marker, contentType)
     if (template === undefined) continue
@@ -68,10 +69,22 @@ export function candidatesFrom(found: readonly CapturedRequest[], pageUrl: strin
     const setup: WebChatSetup = {
       version: 1,
       pageUrl,
-      request: { path: `${url.pathname}${url.search}`, method: entry.method.toUpperCase(), headers: plain, fromPage, body: template.body, encoding: template.encoding },
+      request: {
+        path: `${url.pathname}${url.search}`,
+        method: entry.method.toUpperCase(),
+        headers: plain,
+        fromPage,
+        body: template.body,
+        encoding: template.encoding,
+        ...(entry.credentials === 'include' || entry.credentials === 'same-origin' || entry.credentials === 'omit' ? { credentials: entry.credentials } : {}),
+      },
       response: answer.spec,
       ...(model !== undefined ? { model } : {}),
       capturedAt: now.toISOString(),
+      // Sent directly to the approved address even on another site (asked for: "even if the api site is different, it
+      // should work if I approved it"); the chat window is the fallback when the backend refuses it.
+      method: 'replay',
+      backendUrl: `${url.origin}${url.pathname}${url.search}`,
     }
     candidates.push({
       backend: `${url.origin}${url.pathname}${url.search}`,
@@ -79,6 +92,7 @@ export function candidatesFrom(found: readonly CapturedRequest[], pageUrl: strin
       ...(model !== undefined ? { model } : {}),
       answerPreview: answer.answer.slice(0, 300),
       fromPage,
+      window,
       setup,
     })
   }

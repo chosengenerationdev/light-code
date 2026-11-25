@@ -2629,7 +2629,7 @@ Code, `hub_run` always failing and a woken chat opening at its first message.
   git only as a JSON literal), saves local edits to the hub before committing, and fetches after a
   pull. "Write with agent" reads the hub's diff. Refused mid-turn: the kernel is the turn's too. Only
   while that codebase's chat runs - there is no host to ask otherwise.
-- **The window is learned from the server, not only the table** (asked for: "i am using qwen3.8-27b in
+- **The window is learned from the server, not only the table** (asked for: "i am using qwen3-32b in
   office, auto compact should be according to it"). A self-hosted model's limit is its server's
   `--max-model-len`, which no table knows. `extractContextWindows` reads `max_model_len` /
   `context_length` / `inputTokenLimit` from `/models` (probed once per session, 10s cap) and
@@ -3764,7 +3764,7 @@ strategies are saved to a library and each chat uses one or none.
 ## 12as. Gemini through an OpenAI-compatible gateway, hub reconnection, handoffs that continue (VS Code 0.207.0, host 0.182.0, Fire Code 0.80.0)
 
 Asked for together. Gemini (4, at the office, through an OpenAI-compatible endpoint) "more powerful", with the user's
-condition stated twice: **nothing may change for Qwen (qwen3.8-27b, vLLM) on the same wire format.**
+condition stated twice: **nothing may change for Qwen (qwen3-32b, vLLM) on the same wire format.**
 
 - **Everything Gemini-specific is behind `isGeminiModel(model, baseUrl)`** (`providers/geminiCompat.ts`: "gemini"
   anywhere in the id, or Google's host). `geminiCompat.test.ts` ends with a Qwen block pinning the request byte for
@@ -4258,6 +4258,38 @@ setup". `packages/core/src/webchat/`.
   to `startServer`, and neither `server.ts` nor `session.ts` declared or forwarded it (since the "only me" commit,
   `1eb094c`), so "only me" skills and tools and the web chat panel were absent there. Forwarded now;
   `apps/host/src/personalDir.test.ts` checks it on a running host. The bug shape §19 keeps recording.
+- **Direct first, the chat window as backup** (reported: "POST <url> on another site than the web chat ... so it is not
+  used"; asked for: "implement the backup method to interact directly in the chat window", then "even if the api site
+  is different, it should work if I approved it"). A capture on another site is offered with the whole `backendUrl`
+  and `method: 'replay'`; `askScript` sends to exactly that address (any origin, `redirect: 'error'`, the reply's
+  origin checked) with the page's own `credentials` mode, captured - a cross-site API answering
+  `Access-Control-Allow-Origin: *` refuses `include`. Any failure but 401/403 or a changed reply shape falls back to
+  `askThroughWindow` (chrome.ts), said in the result: the watcher records the page's own requests to the approved backend
+  (`toBackend`: same origin, same path segment by segment, except plainly-id segments - digits, long hex, a UUID),
+  `typeTextScript` types and presses Enter (then Send if the text is still there), and the answer is read from that
+  reply; with none (a WebSocket chat), `newText` reads the screen once stable. `method: 'window'` is still honoured.
+  **Test both ways** (`testWebChat` -> `webChatTest`) asks one question each way and reports each.
+  `chromeReal.test.ts` checks direct and window against a backend on another origin, with real Chrome.
+- **Answers read from event labels, and flags on one line** (reported from real use: Test both ways answered
+  "chat_idprogressprogresscompletionparty_endcontext_usagefinish" both ways, and Fire Code failed with "The browser is
+  already running ... Use --isolated"). (1) `answer.ts` took the longest text, and the events' `type` values joined beat
+  the short real answer. `labelsEvents` (a field in ~every event with name-like, differing values) is never the answer;
+  `answerRank` puts prose over a word over an id (`*_id` fields, letter-digit tokens); `combine` takes deltas followed
+  by the whole text once; `readAnswer` re-finds when a saved spec points at labels, so old captures need no recapture.
+  `replyShape` (fields and sizes, no text) is shown by Test both ways. (2) **Each line under Arguments is one argument**
+  (cross-spawn quotes it); measured with chrome-devtools-mcp 1.13.0's own parser, "--autoConnect --no-usage-statistics
+  --no-performance-crux" on one line is one unknown option, so all were ignored - its own Chrome and usage reporting on.
+  The guard read such a line as several while the launch passed it as one - the two disagreed. **Now both use
+  `stdioCommandLine` (mcp/types.ts)**: a line with an option, no quotes and no backslash is split, at launch (client.ts)
+  and in the check, for every MCP server; verified with the server's own parser. A wiring test pins both callers.
+  **Fix it for me** (`fixChromeServer`, `fixWebChatServer`): splits, adds the reporting-off flags, `--autoConnect`
+  ~~when no Chrome is named~~ (no longer - see below), pins npx to `TESTED_CHROME_MCP`, and saves through `handleSaveMcpServer`.
+  **Which Chrome** (`chromeMode`/`withChromeMode`, `setWebChatChrome`): `--autoConnect` needs Chrome 144+ with remote
+  debugging on at chrome://inspect/#remote-debugging (reported: "could not find DevToolsActivePort" once the flag really
+  applied - it had "worked" because it was ignored). The person chooses their own Chrome or one the server starts (own
+  profile, sign in once, one app at a time); the fix no longer adds `--autoConnect`; `explainChromeError` names both.
+  `explainChromeError` turns "already running" into "add --autoConnect on its own line". Never `--isolated`: that
+  Chrome is not signed in to the web chat.
 - **First real use failed** (reported: "evaluate_script: pageId: Invalid input: expected number, received undefined"):
   chrome-devtools-mcp 1.x requires `pageId` on `evaluate_script` (older releases ran on the selected tab), and its
   "## Pages" lines are `id: Title (url) [selected]` - the first parser took the title's first word as the address, so an
@@ -4268,6 +4300,99 @@ setup". `packages/core/src/webchat/`.
   consultations, tab reused. It found a third fault: a reply *mentioning* the phrase was skipped as "the question", so the
   reply's id was read as the answer (`findAnswer` now skips only text that is the phrase alone). A capture error that
   repeats now ends the capture and is shown (it was only logged). **Not verified against the office's web chat.**
+
+## 12be. A reranker for search (VS Code 0.232.0, host 0.208.0, Fire Code 0.106.0)
+
+Asked for: a BGE reranker (bge-reranker-v2-m3), served behind an OpenAI-compatible provider, for skill and tool
+retrieval, team skills search and codebase search - plan first, then "when both are setup, they should work with each
+other well too". `packages/core/src/rerank/rerank.ts`.
+
+- **Config `reranker`** (profileId, endpoint, minScore 0.05, candidates 30, docs/teamSkills/codebase/picks on unless
+  false): user-scope only (it is sent every search's query and the texts searched), shared under Search. Nothing
+  happens until a profile is chosen; only OpenAI-wire profiles are offered. Auth through `observerStrategy`, like the
+  decision model, so the chat's token cache is untouched. One egress point still (invariant 2).
+- **The client** tries `/v1/rerank` and `/rerank` with `{model, query, documents, top_n}` (vLLM, Infinity, Jina,
+  Cohere), `/rerank` with `{query, texts}` (TEI), then `/v1/score` (`text_1`/`text_2`), **from the server root**
+  (a base URL ending in /v1 had produced /v1/v1/rerank - found by the end-to-end test), remembering what answered per
+  base URL; a configured endpoint is added to the base URL as typed. `readScores` takes `results`/`data`/bare
+  arrays with `relevance_score`/`score`. Batches of 64, four at a time; texts cut at 2000 characters; a 401/403
+  stops the search for a path. **Never throws**: 5 s (2 s for picks), then the caller keeps its own order.
+- **`reorder`** is the one step every search uses: scores, sorts, drops under `minScore`, keeps `limit`; on failure
+  the input order and a note. search_docs over-fetches `candidates` from the index and reranks them on name,
+  description and parameter names; **with no index** it reranks every tool and skill in scope (cap 400) in place of the
+  lexical match. search_codebase and search_team_skills fetch `max(size, candidates)` and show "relevance".
+- **With the decision model** (`picks`): `suggestSkillsAndTools` narrows skills and tools to `PICKS_NARROWED` (10)
+  before the choice question - a 130-way choice spread the probability too thin to pass the threshold. The decision
+  model still chooses (and may choose none). Nothing else the decision model does uses the reranker.
+- Settings → Search → **Reranker** (`RerankerSection.tsx`, self-contained): profile, endpoint, uses, min score,
+  candidates, **Test reranker** (four texts, one plainly the answer; shows order, scores, ms, where it answered).
+- Tests: `rerank/rerank.test.ts` (shapes, /v1 root, batching, timeout, 401, reorder, codebase), host
+  `reranker.test.ts` (TEI-only stand-in: Test, search_docs with no index, nothing asked without one, failure kept
+  working) and `decisionModel.test.ts` (eleven options with both). **Not verified against the office's reranker.**
+
+## 12bf. Certificates for MCP, thinking-free suggestions, debugger data, memory, roles report (VS Code 0.233.0, host 0.209.0, Fire Code 0.107.0)
+
+Reported and asked for together.
+
+- **HTTP MCP servers go through the one HttpClient** (`HttpClient.fetchFunction(tls)`: undici's fetch with the pooled
+  agent or proxy; the SDK transports take `fetch`). They had used the SDK's global fetch - VS Code's (patched to trust
+  the Windows store) in the extension, plain Node's in Fire Code ("unable to verify the first certificate"). The
+  registry asks `fetchFor` on every connect; the bridge resolves the server's `tls` (caFile, rejectUnauthorized) over
+  the global block through `resolveConnectionTls`. **`buildCaBundle` adds the OS store** (`systemCertificates`,
+  `tls.getCACertificates('system')`, Node 22.15+; `LIGHT_CODE_SYSTEM_CA=0` leaves it out) for every connection.
+  **Found by `mcp/httpsCertificate.test.ts`: `tlsKey` left out `rejectUnauthorized`**, so two connections with the same
+  certificates shared one pooled agent and the first decided for both - a verifying connection could get a
+  non-verifying agent. In the key now.
+- **Suggestions while typing** ask with thinking off (Qwen's `enable_thinking: false` when the model or profile says
+  Qwen), and again as the profile is if the gateway refuses; failures are logged. A Qwen3 thought until the 8 s limit.
+  The OpenAI adapter sends no max_tokens; the stream is cut at the first newline instead. `typeAhead.test.ts`.
+- **Debugger data**: `read_debug_session` takes `expand` (dotted path), `frame`, `depth` - DAP `variables` only, nothing
+  run. `evaluate_in_debug_session` (`command` group, preview the literal expression, in `NEVER_AVAILABLE_TO_SCHEDULES`):
+  DAP `evaluate` in the frame, `clipboard` context then `repl`, a str result unquoted, children one level. The relay
+  carries both (`op: 'debug'` with the request, `op: 'debugEvaluate'`); `createRelayDebugEvaluator` asks every window
+  which is paused and evaluates in that one only - never twice. **Not verified against a live debugpy.**
+- **Embedding failures**: `Embedder.embedBatch` retries every failure twice (1 s, 3 s) unless cancelled - reported as
+  "invalid request ... model not allowed" that came and went and stopped agents; `searchFailure` tells the agent to
+  carry on with search_files / the listed skills (search_codebase, search_team_skills).
+- **Memory** (`memory/store.ts`): one JSON file per codebase beside the instructions (`memoryPath`; Fire Code's
+  `codebaseDir/memory`), outside the repository, written whole and re-read inside a per-file queue. The Anti
+  Hallucinator's contract gains `remember` and `applied` (`MEMORY_RULES`, only when on); `guardMemory` parses them; the
+  hub sends a `memory` event (numbered M1...) before the next `turnStart` when it changed (`setMemory`), never
+  recorded. The agent gets `renderMemoryForAgent` after the codebase instructions each turn. `samePoint` (80% of the
+  shorter's words) drops repeats; 100 entries, oldest unused dropped first, never one the user added. Settings → Project →
+  Memory (`MemorySection.tsx`); `observers.antiHallucination.memory` (on unless false), saved per project.
+- **Roles report** (`observers/report.ts`): `consultation` events (role, name, model, ms, ok, readOnly) from
+  `consultAgentNow` - the one path every consultation takes - and `participants` on `turnStart` (decision model,
+  reranker, Auditor, Anti Hallucinator). `read_audit_log` action `roles` (task "current" by default; the journal filters
+  by task, an index result is filtered after) and **Report on this chat** in the Auditor panel.
+- **Follow-ups (VS Code 0.234.0, host 0.210.0, Fire Code 0.108.0).** The memory is **pinned** to the Anti Hallucinator
+  (`ObserverAgent.pin`): sent now and first to every later process - a handoff carries only the observer's notes, so a
+  replaced process had not known it. **Growth**: 500 kept (never a user's entry removed for room); past
+  `MEMORY_SHOWN_CHARS`/`MEMORY_SHOWN_MAX` `selectMemory` gives each request the entries that bear on it (reranker scores,
+  else shared words, small weight for the user's and used ones), agent and Anti Hallucinator alike, numbering per
+  selection. **Suggestions** with a native Gemini profile ask `thinkingBudget: 0` too (2.5+ think by default); 12 s.
+- **Behind the scenes in the audit (VS Code 0.235.0, host 0.211.0, Fire Code 0.109.0)** - asked for: the Auditor must
+  say how the reranker and decision model were used, so the user can check it went as wanted. A `behind` event (area +
+  one sentence; never sent to the Anti Hallucinator): every `reorder` reports through `Reranking.report` (search, model,
+  candidates, first five with scores, set aside, or failure and own order kept), memory kept / selected / used to
+  redirect, model retries, compaction. `rolesReport` builds a request-by-request timeline from turnStart, decision
+  (with the best probability), behind, consultation, denials, refusals, alerts, notes and findings; rendered under
+  "Behind the scenes, request by request" (40 lines a request). **Suggestions**: `composerCompletionProfileId` (a fast
+  model for them alone); aborts carry a reason (`superseded` / `timeout`) so only real failures are logged, and
+  `completionSettings` shows the last outcome under the switch (`SuggestionModel.tsx`). Found from the VS Code log:
+  a large Gemini model was aborted at the time limit every time.
+- **Seats choose a provider and a model (VS Code 0.236.0, host 0.212.0, Fire Code 0.110.0)** - asked for: "select the
+  provider and then select the model for that seat ... else user have to create many providers". `providers/seat.ts`:
+  `seatProfile(profile, model)` - the same profile with only the model changed (capability overrides dropped: they are
+  the profile's own model's), unchanged without one; `seatLabel` "Profile · model". `model` on role assignments,
+  `decisionModel`, `reranker`, `observers.<role>`, and `composerCompletionModel`; applied where each seat's profile is
+  found (rerankerFrom, decisionModelFrom, startObserver, consultAgentInner, suggestCompletion, turnParticipants; the
+  bridge imports it as `withSeatModel` - consultAgentInner has a local `seatProfile`). `requestProfileModels` lists a
+  saved profile's models; `SeatModelPicker.tsx` (own model first, list loaded by itself, free text) under every seat.
+  The provider form fetches its list on its own (700 ms after the address/key/auth/wire settle, so on open too), and
+  `ModelSelect` always shows the dropdown. **Fixed with it**: the observers panel rebuilt `antiHallucination` from
+  the fields it edits, dropping `memory`; it now spreads the stored block first.
+- **Fire Code crashes**: the cause still needs the office's crash logs (`crashes/host-*.log` beside each chat's log).
 
 ## 13. Python interop and skills (phase 9)
 

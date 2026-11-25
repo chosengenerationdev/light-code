@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { HostLanguageModels, HostModelInfo, HostModelRequest } from '../../providers/hostModels.js'
 import type { StreamChunk } from '../../providers/types.js'
-import type { DebugSessionSnapshot } from '../../tools/debugSession.js'
+import type { DebugEvaluation, DebugReadRequest, DebugSessionSnapshot } from '../../tools/debugSession.js'
 
 /**
  * GitHub Copilot for Fire Code, the Node host and the JetBrains plugin, through a VS Code window.
@@ -32,7 +32,11 @@ interface RelayEntry {
   startedAt: number
 }
 
-type RelayOp = { op: 'list' } | { op: 'chat'; request: HostModelRequest } | { op: 'debug' }
+type RelayOp =
+  | { op: 'list' }
+  | { op: 'chat'; request: HostModelRequest }
+  | { op: 'debug'; request?: DebugReadRequest }
+  | { op: 'debugEvaluate'; expression: string; frame?: number }
 type RelayRequest = RelayOp & { token: string }
 
 /** One request line may carry a long conversation with pictures in it. */
@@ -66,7 +70,12 @@ function writeLine(socket: Socket, value: unknown): void {
  */
 export function startLmRelay(
   models: HostLanguageModels | undefined,
-  options: { dir?: string; log?: (line: string) => void; debug?: () => Promise<DebugSessionSnapshot | undefined> } = {},
+  options: {
+    dir?: string
+    log?: (line: string) => void
+    debug?: (request?: DebugReadRequest) => Promise<DebugSessionSnapshot | undefined>
+    evaluate?: (request: { expression: string; frame?: number }) => Promise<DebugEvaluation | undefined>
+  } = {},
 ): { dispose(): void; pipe: string } {
   const dir = options.dir ?? defaultRelayDir()
   const token = randomBytes(32).toString('hex')
@@ -114,7 +123,9 @@ export function startLmRelay(
     }
     try {
       if (request.op === 'debug') {
-        writeLine(socket, { debug: (await options.debug?.()) ?? null })
+        writeLine(socket, { debug: (await options.debug?.(request.request)) ?? null })
+      } else if (request.op === 'debugEvaluate') {
+        writeLine(socket, { evaluation: (await options.evaluate?.({ expression: request.expression, ...(request.frame !== undefined ? { frame: request.frame } : {}) })) ?? null })
       } else if (request.op === 'list' || request.op === 'chat') {
         if (models === undefined) {
           writeLine(socket, { error: 'This VS Code window offers no language models (it is too old for the Language Model API).' })
@@ -311,15 +322,39 @@ function askWindow(entry: RelayEntry, file: string, request: RelayOp, timeoutMs:
  * asked - the program being debugged need not be in the newest one - and a session paused at a breakpoint
  * is preferred over one that is merely running. Undefined when windows are open but none is debugging.
  */
-export function createRelayDebugReader(options: { dir?: string } = {}): () => Promise<DebugSessionSnapshot | undefined> {
+export function createRelayDebugReader(options: { dir?: string } = {}): (request?: DebugReadRequest) => Promise<DebugSessionSnapshot | undefined> {
   const dir = options.dir ?? defaultRelayDir()
-  return async () => {
+  return async (request) => {
     const entries = relayEntries(dir)
-    const answers = await Promise.all(entries.map(({ entry, file }) => askWindow(entry, file, { op: 'debug' }, 8_000)))
+    const answers = await Promise.all(entries.map(({ entry, file }) => askWindow(entry, file, { op: 'debug', ...(request !== undefined ? { request } : {}) }, 8_000)))
     if (!answers.some((answer) => answer !== undefined)) throw new Error(NO_VSCODE_DEBUG)
     const sessions = answers
       .map((answer) => answer?.['debug'])
       .filter((debug): debug is DebugSessionSnapshot => debug !== null && debug !== undefined && typeof debug === 'object')
     return sessions.find((session) => session.stopped !== undefined) ?? sessions[0]
+  }
+}
+
+/**
+ * An expression evaluated in a VS Code window's paused debug session, for Fire Code and the Light Code host. Every
+ * window is first asked which has a paused session, and the expression is sent to that one window only - evaluating
+ * runs code in the program, and must never run twice. Undefined when nothing is paused anywhere.
+ */
+export function createRelayDebugEvaluator(options: { dir?: string } = {}): (request: { expression: string; frame?: number }) => Promise<DebugEvaluation | undefined> {
+  const dir = options.dir ?? defaultRelayDir()
+  return async (request) => {
+    const entries = relayEntries(dir)
+    const answers = await Promise.all(entries.map(({ entry, file }) => askWindow(entry, file, { op: 'debug' }, 8_000)))
+    if (!answers.some((answer) => answer !== undefined)) throw new Error(NO_VSCODE_DEBUG)
+    const paused = answers.findIndex((answer) => {
+      const debug = answer?.['debug'] as DebugSessionSnapshot | null | undefined
+      return debug !== null && debug !== undefined && debug.stopped !== undefined
+    })
+    const target = paused < 0 ? undefined : entries[paused]
+    if (target === undefined) return undefined
+    const answer = await askWindow(target.entry, target.file, { op: 'debugEvaluate', expression: request.expression, ...(request.frame !== undefined ? { frame: request.frame } : {}) }, 30_000)
+    const evaluation = answer?.['evaluation']
+    if (evaluation === null || evaluation === undefined || typeof evaluation !== 'object') return undefined
+    return evaluation as DebugEvaluation
   }
 }

@@ -5,7 +5,7 @@ import type { HttpClient } from '../platform/http.js'
 import type { HostLanguageModels } from '../providers/hostModels.js'
 import type { SecretStore } from '../platform/secrets.js'
 import type { Transport } from '../platform/transport.js'
-import type { DebugSessionSnapshot } from '../tools/debugSession.js'
+import type { DebugEvaluation, DebugReadRequest, DebugSessionSnapshot } from '../tools/debugSession.js'
 import type { JupyterHubSpec } from '../jupyter/spec.js'
 import type { CredentialSummary } from '../secrets/credentials.js'
 import type { MonitorExecutorChannel, MonitoringChannel } from '../monitoring/channel.js'
@@ -421,5 +421,10 @@ export interface HostServices {
    * no `vscode.debug` API, so `read_debug_session` is simply not registered there, the same rule
    * every other host-specific tool follows.
    */
-  readDebugSession?: () => Promise<DebugSessionSnapshot | undefined>
+  readDebugSession?: (request?: DebugReadRequest) => Promise<DebugSessionSnapshot | undefined>
+  /**
+   * An expression evaluated in the paused debug session (`evaluate_in_debug_session`); undefined when nothing is paused.
+   * Absent where there is no debugger to ask, like `readDebugSession`.
+   */
+  evaluateInDebugSession?: (request: { expression: string; frame?: number }) => Promise<DebugEvaluation | undefined>
 }

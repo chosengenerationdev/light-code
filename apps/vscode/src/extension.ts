@@ -1,7 +1,7 @@
 import * as vscode from 'vscode'
 import { ConfigManager, Logger, isDue, mainCheckoutOf, startLmRelay, wireChatBridge, type ChatBridge, type Schedule } from '@light-code/core'
 import { vscodeLanguageModels } from './platform/languageModels.js'
-import { readDebugSession, startTrackingDebugSessions } from './platform/debugSession.js'
+import { evaluateInDebugSession, readDebugSession, startTrackingDebugSessions } from './platform/debugSession.js'
 import { VSCodeConfigStore } from './platform/config.js'
 import { WebviewTransport } from './platform/transport.js'
 import { ChatViewProvider, StrategyPanel } from './webview/chatViewProvider.js'
@@ -222,7 +222,7 @@ export function activate(context: vscode.ExtensionContext): void {
    * investigate a program paused in VS Code. Served whether or not Copilot is available.
    */
   startTrackingDebugSessions(context)
-  const relay = startLmRelay(models, { log: (line) => outputChannel.appendLine(`[info] ${line}`), debug: readDebugSession })
+  const relay = startLmRelay(models, { log: (line) => outputChannel.appendLine(`[info] ${line}`), debug: readDebugSession, evaluate: evaluateInDebugSession })
 
   // Branches in their own windows: open one, list them, close one safely.
   const branchCommands = registerBranchCommands(context, configManager, () => {

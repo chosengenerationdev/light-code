@@ -116,6 +116,8 @@ export interface AuditQuery {
   /** Case-insensitive text anywhere in the record. */
   contains?: string
   session?: string
+  /** One task (chat), by its id. */
+  task?: string
   /** Every workspace's record, not only this one. */
   allWorkspaces?: boolean
   limit?: number
@@ -172,6 +174,7 @@ export async function readAudit(storageDir: string, workspace: string | undefine
       if (query.from !== undefined && record.at < query.from) continue
       if (query.until !== undefined && record.at > query.until) continue
       if (types !== undefined && !types.has(record.type)) continue
+      if (query.task !== undefined && record.task !== query.task) continue
       if (query.tool !== undefined && !(record.event !== undefined && 'tool' in record.event && record.event.tool === query.tool)) continue
       if (needle !== undefined && !line.toLowerCase().includes(needle)) continue
       matched.push(record)

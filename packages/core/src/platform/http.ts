@@ -89,6 +89,11 @@ export interface HttpClient {
    * speaks only over one. Optional, so test fakes and hosts without it simply lack the feature.
    */
   openWebSocket?(url: string, options?: { headers?: Record<string, string>; tls?: TlsOptions }): WebSocketConnection
+  /**
+   * A standard fetch going out the same way as `request` - its TLS material, the Windows certificate store and proxy
+   * routing - for a library that takes one (the MCP SDK's HTTP transports). Optional, like `openWebSocket`.
+   */
+  fetchFunction?(tls?: TlsOptions): (url: string | URL, init?: RequestInit) => Promise<Response>
 }
 
 /** The few things a caller needs from a WebSocket: text frames in and out, and its end. */
@@ -118,6 +123,13 @@ function tlsKey(tls: TlsOptions): string {
     hash.update('|')
   }
   hash.update(tls.passphrase ?? '')
+  /*
+   * Whether the certificate is checked is part of the connection: without it in the key, two connections with the same
+   * certificates shared one pooled agent, and whichever was made first decided for both - a connection told not to
+   * verify kept verifying, and one that must verify could be handed an agent that does not (found by
+   * mcp/httpsCertificate.test.ts).
+   */
+  hash.update(tls.rejectUnauthorized === false ? '|noverify' : '|verify')
   return hash.digest('hex')
 }
 
@@ -230,6 +242,16 @@ export class FetchHttpClient implements HttpClient {
     this.agents.clear()
     for (const agent of this.proxyAgents.values()) void agent.close()
     this.proxyAgents.clear()
+  }
+
+  fetchFunction(tls?: TlsOptions): (url: string | URL, init?: RequestInit) => Promise<Response> {
+    return async (url, init) => {
+      const target = new URL(String(url))
+      const dispatcher = (this.proxyFor(target, tls) ?? this.agentFor(tls ?? {})) as unknown as Dispatcher
+      // undici's own fetch, given the dispatcher: the global fetch has no way to take one.
+      const response = await undiciFetch(target, { ...(init as Record<string, unknown>), dispatcher } as Parameters<typeof undiciFetch>[1])
+      return response as unknown as Response
+    }
   }
 
   openWebSocket(url: string, options: { headers?: Record<string, string>; tls?: TlsOptions } = {}): WebSocketConnection {

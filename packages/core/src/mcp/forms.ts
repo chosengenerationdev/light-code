@@ -47,6 +47,10 @@ export interface McpServerForm {
    */
   transport: '' | 'streamable-http' | 'sse'
   headers: Record<string, string>
+  /** `http`: a CA file to trust for this server as well as the machine's. */
+  caFile: string
+  /** `http`: do not check this server's certificate at all (a real hole; the CA file is the fix). */
+  skipVerify: boolean
   env: Record<string, string>
   cwd: string
   /**
@@ -69,6 +73,8 @@ export const BLANK_MCP_FORM: McpServerForm = {
   url: '',
   transport: '',
   headers: {},
+  caFile: '',
+  skipVerify: false,
   env: {},
   cwd: '',
   timeout: '',
@@ -155,6 +161,8 @@ export function toMcpServerForm(config: McpServerConfig): McpServerForm {
       // `http` is the same protocol as `streamable-http` under another name, as in other clients.
       transport: config.type === 'sse' ? 'sse' : config.type === undefined ? '' : 'streamable-http',
       headers: config.headers ?? {},
+      caFile: config.tls?.caFile ?? '',
+      skipVerify: config.tls?.rejectUnauthorized === false,
       timeout: config.timeout === undefined ? '' : String(config.timeout),
     }
   }
@@ -227,6 +235,9 @@ export function fromMcpServerForm(
        * from an edit about something else entirely.
        */
       ...(form.transport !== '' ? { type: form.transport } : {}),
+      ...(form.caFile.trim() !== '' || form.skipVerify
+        ? { tls: { ...(form.caFile.trim() !== '' ? { caFile: form.caFile.trim() } : {}), ...(form.skipVerify ? { rejectUnauthorized: false } : {}) } }
+        : {}),
       ...timeout,
       ...preserved,
     }

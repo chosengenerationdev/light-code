@@ -9,6 +9,7 @@ import { Panel } from './Panel.js'
 
 type WebChatMessage = Extract<HostToUiMessage, { type: 'webChat' }>
 type CaptureMessage = Extract<HostToUiMessage, { type: 'webChatCapture' }>
+type TestMessage = Extract<HostToUiMessage, { type: 'webChatTest' }>
 
 /** The Chrome DevTools MCP server entry the rules allow: an installed copy, reporting off, this PC's Chrome only. */
 const SERVER_ENTRY = `"chrome-webchat": {
@@ -30,6 +31,7 @@ export function WebChatSection(props: { transport: Transport }): ReactElement | 
   const [pageUrl, setPageUrl] = useState('')
   const [model, setModel] = useState('')
   const [server, setServer] = useState('')
+  const [test, setTest] = useState<TestMessage | undefined>(undefined)
 
   useEffect(() => {
     const unsubscribe = transport.onMessage((raw) => {
@@ -42,6 +44,8 @@ export function WebChatSection(props: { transport: Transport }): ReactElement | 
           setModel(message.setup.modelOverride ?? '')
         }
         if (message.message !== undefined) setCapture(undefined)
+      } else if (message.type === 'webChatTest') {
+        setTest(message)
       } else if (message.type === 'webChatCapture') {
         setCapture(message)
       }
@@ -86,6 +90,27 @@ export function WebChatSection(props: { transport: Transport }): ReactElement | 
               }}
             />
           )}
+          {chosenEntry !== undefined && (chosenEntry.mode === 'own' || chosenEntry.mode === 'started') && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span>Which Chrome</span>
+              <Select
+                value={chosenEntry.mode}
+                ariaLabel="Which Chrome the web chat uses"
+                options={[
+                  { value: 'own', label: 'Your own Chrome', detail: 'already signed in; needs remote debugging on (chrome://inspect/#remote-debugging, Chrome 144+)' },
+                  { value: 'started', label: 'A Chrome it starts', detail: 'its own profile - sign in once; one app at a time' },
+                ]}
+                onChange={(value) => {
+                  if (value === 'own' || value === 'started') post({ type: 'setWebChatChrome', server: chosenEntry.name, mode: value })
+                }}
+              />
+              <span style={{ color: colors.muted }}>
+                {chosenEntry.mode === 'own'
+                  ? 'Uses the Chrome you already have open, where you are signed in - VS Code and Fire Code can both use it. Switch remote debugging on once in that Chrome at chrome://inspect/#remote-debugging (Chrome 144 or newer). If your organisation blocks it, choose "A Chrome it starts".'
+                  : 'Opens a Chrome of its own, with its own profile: sign in to the web chat there once and it remembers. Only one app (VS Code or Fire Code) can have it open at a time.'}
+              </span>
+            </div>
+          )}
           {chosenEntry?.registry !== undefined && (
             <span style={{ color: colors.muted }}>
               npx downloads it from <code style={{ fontFamily: monospaceFamily }}>{chosenEntry.registry}</code> (npm's own setting) - this should be your
@@ -100,6 +125,16 @@ export function WebChatSection(props: { transport: Transport }): ReactElement | 
                   <li key={problem}>{problem}</li>
                 ))}
               </ul>
+              {chosenEntry.fixable === true && (
+                <button
+                  type="button"
+                  style={primaryButtonStyle(false)}
+                  title="Adds what is missing to this server's entry in Settings → MCP (each option on its own line) and restarts it."
+                  onClick={() => post({ type: 'fixWebChatServer', server: chosenEntry.name })}
+                >
+                  Fix it for me
+                </button>
+              )}
             </div>
           )}
           {state.chrome.chosen !== undefined && !servers.some((entry) => entry.name === state.chrome.chosen) && (
@@ -123,6 +158,11 @@ export function WebChatSection(props: { transport: Transport }): ReactElement | 
             <span>
               Approved backend address (the only one used): <code style={{ fontFamily: monospaceFamily }}>{setup.method} {setup.backend}</code>
             </span>
+            <span style={{ color: colors.muted }}>
+              {setup.via === 'window'
+                ? 'Through the chat window: each question is typed into the chat and sent; the answer is read from its reply from this address.'
+                : 'Sent from inside the chat page, signed in as you, to this address only. If that is refused, the question is typed into the chat window instead and the answer read from its reply from this address.'}
+            </span>
             {state.hostProblem !== undefined && state.hostProblem.length > 0 && <span style={{ color: colors.error }}>{state.hostProblem}</span>}
             {setup.fromPage.length > 0 && (
               <span style={{ color: colors.muted }}>Signed with {setup.fromPage.join(', ')}, taken from the page each time and never stored.</span>
@@ -145,7 +185,47 @@ export function WebChatSection(props: { transport: Transport }): ReactElement | 
               <button type="button" style={secondaryButtonStyle()} onClick={() => post({ type: 'clearWebChat' })}>
                 Remove
               </button>
+              <button
+                type="button"
+                style={secondaryButtonStyle()}
+                onClick={() => {
+                  setTest({ type: 'webChatTest', running: 'direct' })
+                  post({ type: 'testWebChat' })
+                }}
+                {...disabledWhen(
+                  [!chromeReady, 'Choose a Chrome DevTools MCP server that can be used (step 1).'],
+                  [test?.running !== undefined, 'A test is running.'],
+                  { enabledTitle: 'Ask the web chat one short question both ways: directly to the approved address, then through the chat window.' },
+                )}
+              >
+                Test both ways
+              </button>
             </div>
+            {test !== undefined && (
+              <div data-testid="webchat-test" style={{ display: 'flex', flexDirection: 'column', gap: 4, border: `1px solid ${colors.border}`, borderRadius: 4, padding: 6 }}>
+                {(['direct', 'window'] as const).map((way) => {
+                  const result = test.results?.find((entry) => entry.way === way)
+                  const label = way === 'direct' ? 'Direct to the approved address' : 'Through the chat window'
+                  return (
+                    <div key={way}>
+                      <strong>{label}: </strong>
+                      {result === undefined ? (
+                        <span style={{ color: colors.muted }}>{test.running === way ? 'asking…' : 'waiting'}</span>
+                      ) : (
+                        <span style={{ color: result.ok ? undefined : colors.error }}>
+                          {result.ok ? 'works' : 'failed'} ({(result.ms / 1000).toFixed(1)} s{result.from === 'screen' ? ', read off the screen' : ''}) - {result.text}
+                        </span>
+                      )}
+                      {result?.shape !== undefined && (
+                        <div style={{ color: colors.muted, fontSize: 11, fontFamily: monospaceFamily, userSelect: 'text' }} title="The reply's fields and sizes, without its text - send this if the answer looks wrong.">
+                          Reply: {result.shape}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ fontSize: 12, margin: '4px 0 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -208,6 +288,13 @@ export function WebChatSection(props: { transport: Transport }): ReactElement | 
                         {candidate.method} {candidate.backend}
                       </code>
                     </div>
+                    {candidate.window && (
+                      <div style={{ color: colors.muted }}>
+                        On another site than the chat page. Once approved, questions are sent to this address directly from inside the page, signed in
+                        as you; if that is refused, they are typed into the <strong>chat window</strong> and the answer read from its reply from this
+                        address.
+                      </div>
+                    )}
                     {candidate.model !== undefined && <div>Model: {candidate.model}</div>}
                     <div style={{ color: colors.muted }}>Answer read from it: "{candidate.answerPreview}"</div>
                     <button type="button" style={{ ...primaryButtonStyle(false), marginTop: 4 }} onClick={() => post({ type: 'confirmWebChatCapture', index })}>

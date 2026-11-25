@@ -1,3 +1,4 @@
+import { seatLabel } from '../providers/seat.js'
 import {
   defaultPromptFor,
   knownRoles,
@@ -24,6 +25,8 @@ export interface AgentAssignment {
   kind: 'cli' | 'profile'
   /** Required when `kind` is `profile`. */
   profileId?: string | undefined
+  /** A model from that profile's provider, when not the profile's own (providers/seat.ts). */
+  model?: string | undefined
   /**
    * The system prompt, when the user has edited it.
    *
@@ -78,6 +81,8 @@ export interface ResolvedAgent {
   summary: string
   kind: 'cli' | 'profile'
   profileId?: string
+  /** The model this role asks, when not its profile's own. */
+  model?: string
   /** The label to show and to attribute an answer to. */
   label: string
   prompt: string
@@ -176,7 +181,8 @@ export function resolveTeam(context: TeamContext): ResolvedAgent[] {
       summary: info.summary,
       kind: 'profile',
       ...(assignment.profileId !== undefined ? { profileId: assignment.profileId } : {}),
-      label: profile?.label ?? assignment.profileId ?? 'unassigned',
+      ...(assignment.model !== undefined && assignment.model.trim() !== '' ? { model: assignment.model.trim() } : {}),
+      label: profile !== undefined ? seatLabel(profile, assignment.model) : (assignment.profileId ?? 'unassigned'),
       prompt,
       usesTools,
       canWrite,

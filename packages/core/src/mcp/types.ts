@@ -82,6 +82,13 @@ export const httpServerSchema = z.object({
    */
   type: z.enum(['sse', 'streamable-http', 'http']).optional(),
   headers: z.record(z.string(), z.string()).optional(),
+  /**
+   * This server's certificate settings, over the machine's (Settings -> Network): a CA file to trust as well, and
+   * `rejectUnauthorized: false` to not check its certificate at all - a real hole (anything in between can read and
+   * change the traffic, tokens included), offered because an internal server with a certificate nobody can export is
+   * common. The CA file is the fix; this is the escape hatch, as for a provider profile.
+   */
+  tls: z.object({ caFile: z.string().optional(), rejectUnauthorized: z.boolean().optional() }).optional(),
   disabled: z.boolean().optional(),
   disabledTools: z.array(z.string()).optional(),
   /** Calls this server may never make. See `deny.ts`. */
@@ -112,6 +119,30 @@ export type McpServersConfig = z.infer<typeof mcpServersSchema>
 
 export function isStdioServer(config: McpServerConfig): config is StdioServerConfig {
   return 'command' in config
+}
+
+/**
+ * A line that is plainly several words of a command line - it has an option in it (`-y`, `--autoConnect`), no quotes
+ * and no backslash, so it cannot be a Windows path with a space in it. Such a line is split on spaces.
+ */
+function isJoinedLine(line: string): boolean {
+  const trimmed = line.trim()
+  return /\s/.test(trimmed) && !/["'\\]/.test(trimmed) && /(^|\s)--?[A-Za-z]/.test(trimmed)
+}
+
+/**
+ * The program and its arguments as the server will be started with them. Each line under Arguments is one argument, and
+ * people type several options on one line ("--autoConnect --no-usage-statistics") or the whole command line into
+ * Command - reported more than once, tiring every time. Passed on as typed, such a line reaches the server as one
+ * argument it ignores (measured against chrome-devtools-mcp's own parser: one unknown option, every flag lost). So a
+ * line that is plainly several words (`isJoinedLine`) is split; anything with quotes or a backslash is left exactly as
+ * typed. Used to start the server and to check it, so the two cannot disagree.
+ */
+export function stdioCommandLine(config: Pick<StdioServerConfig, 'command' | 'args'>): { command: string; args: string[] } {
+  const words = (line: string): string[] => line.trim().split(/\s+/)
+  const head = isJoinedLine(config.command) ? words(config.command) : [config.command]
+  const args = (config.args ?? []).flatMap((arg) => (isJoinedLine(arg) ? words(arg) : [arg])).filter((arg) => arg.length > 0)
+  return { command: head[0] ?? config.command, args: [...head.slice(1), ...args] }
 }
 
 export type McpServerStatus = 'idle' | 'connecting' | 'ready' | 'failed' | 'disabled'

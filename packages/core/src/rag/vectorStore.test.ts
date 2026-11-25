@@ -310,7 +310,9 @@ describe('search_codebase over the seam', () => {
       connectionLabel: 'corp cluster',
     })
 
-    expect(await tool.execute({ query: 'anything' }, noContext)).toMatchObject({ isError: true, content: 'cluster unreachable' })
+    expect(await tool.execute({ query: 'anything' }, noContext)).toMatchObject({ isError: true, content: expect.stringContaining('cluster unreachable') })
+    // And what to do instead: reported, agents stopped on a passing search failure.
+    expect((await tool.execute({ query: 'anything' }, noContext)).content).toContain('Do not stop because of it: find the code with search_files')
   })
 })
 

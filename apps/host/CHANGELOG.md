@@ -1,5 +1,64 @@
 # @chosengeneration/light-code
 
+## 0.212.0
+
+- **Choose the provider, then the model, for every seat:** each specialist role, the decision model, the reranker, the Auditor, the Anti Hallucinator and suggestions while typing now have **Its model** under the provider - from that provider's own list, loaded by itself, or typed. One provider profile serves every seat; no more one profile per model. A seat with no model chosen works as before.
+- **The provider form loads its model list by itself** - when it opens on a saved profile, when a preset fills in the address, and after the address or key changes - and the dropdown is always there, saying what it is waiting for. Refresh is only for a list that changed.
+- **Suggestions while typing moved to Settings → Project** (from Appearance), with the model chosen the same two-step way.
+- **Fixed:** saving the Auditor / Anti Hallucinator settings reset the Memory switch. Suggestions show the gateway's whole error, and for a 404 that the model name is not available to the key.
+
+## 0.211.0
+
+- **The Auditor tells you what happened behind the scenes:** Report on this chat (and read_audit_log with action "roles") now goes request by request through everything Light Code did - each decision model choice with its probability, each reranker run (which search, what it put first with scores, what it set aside, or that it failed and the search kept its order), the memory kept, selected or used, specialists consulted, retried requests, compaction, denials, alerts and notes - so you can check it went the way you wanted.
+- **Model for suggestions:** suggestions while typing can use a small, fast model of their own (Settings → Project), and the panel says why the last one did not appear. Reported: a large Gemini model never started answering within the time limit.
+
+## 0.210.0
+
+- **Memory as it grows:** past about 6,000 characters (40 entries), each request is given the remembered points that bear on it - by the reranker when one is set up - however old they are; the agent is told how many others there are. Up to 500 are kept, and an entry you added is never removed to make room.
+- **The Anti Hallucinator always has the memory:** it is sent first to every new Anti Hallucinator process - after a handoff, a crash or a restart - not only when it changes.
+- **Fixed: suggestions while typing with a Gemini model** (2.5 and later think by default): asked with thinkingBudget 0, and given 12 seconds.
+
+## 0.209.0
+
+- **Fixed: HTTP MCP servers and "unable to verify the first certificate" in Fire Code.** HTTP servers now go out through Light Code's own connection, which trusts the Windows certificate store and Settings → Network's certificate - as VS Code did. Each HTTP server can also have its own **CA certificate** file and a **Don't verify this server's certificate** option (with a plain warning). Also fixed: a connection told not to verify a certificate could share a connection that verifies, and the other way round.
+- **Fixed: suggestions while typing did not appear with a thinking model** (such as Qwen3): it spent the whole time limit thinking. The suggestion now asks it not to think, and asks again without that option if the gateway refuses it.
+- **DataFrames and complex objects in a debug session:** read_debug_session can open a variable up (its columns, attributes or items, a few levels deep, running nothing), and the new evaluate_in_debug_session evaluates an expression where the program stopped (df.head(50).to_string()) - it asks first, showing the exact expression. From Fire Code too, through VS Code.
+- **Agents no longer stop on a passing search failure:** an embedding request that fails ("invalid request ... model not allowed") is asked again twice, and if it still fails, codebase and team skills search tell the agent how to carry on instead.
+- **Memory:** Settings → Project → Memory. The Anti Hallucinator keeps the lasting corrections and guidance you give, every chat on the codebase is given them, and the Anti Hallucinator redirects the agent when it is about to go against one. Every entry can be edited or removed, and you can add your own.
+- **Who worked on a task:** Report on this chat (Auditor panel), or read_audit_log with action "roles" - the main agent's model and mode, every specialist consulted with its model, time and failures, the decision model, the reranker and the reviewers.
+
+## 0.208.0
+
+- **A reranker** (such as BAAI's bge-reranker-v2-m3): add it under Providers as an OpenAI-compatible profile and choose it in Settings → Search → **Reranker**. It reads each thing a search found together with the question and puts the most relevant first, setting aside what does not fit. Used for:
+  - **finding tools and skills** (search_docs) - and with no vector index, it ranks every tool and skill itself, in place of the word match;
+  - **team skills search** and **codebase search** - more candidates are fetched and reordered, each result showing its relevance;
+  - **with a decision model**, the per-chat skill and tool picks: the reranker narrows to the best ten and the decision model chooses among them.
+- It finds the server's reranking path by itself (/v1/rerank, /rerank, TEI's /rerank, /v1/score - a base URL ending in /v1 is fine) and remembers it; **Test reranker** shows the order, the scores and where it answered. If it is slow or fails, a search keeps its own order and says so.
+
+## 0.207.0
+
+- **Which Chrome** (Settings → Agents → Web chat, once a server is chosen): **Your own Chrome** - the one you have open and are signed in to, which VS Code and Fire Code can share; it needs Chrome 144 or newer with remote debugging switched on once at chrome://inspect/#remote-debugging - or **A Chrome it starts** - a Chrome with its own profile where you sign in to the web chat once; one app at a time. Switching it rewrites that server's entry and restarts it.
+- "Could not connect to Chrome ... DevToolsActivePort" now says what to do. It appeared once --autoConnect really took effect: before, options typed on one line were ignored and the server quietly started a Chrome of its own.
+- **Fix it for me** no longer adds --autoConnect; which Chrome to use is your choice above.
+
+## 0.206.0
+
+- **Fixed for good: "cannot be used yet - its arguments must include --no-usage-statistics" with the options already there.** Options typed on one line under Arguments (or the whole command line typed into Command) are now split into separate arguments when the server starts, and the web chat reads them the same way - so what you typed works as you meant it, for any MCP server. A line with quotes or a backslash (a path with a space) is still passed exactly as typed. Checked with chrome-devtools-mcp's own option parser.
+- **Fix it for me**: when the web chat says a Chrome DevTools server cannot be used yet, one button adds what is missing to that server's entry (each option on its own line, --autoConnect when it names no Chrome, npx pinned to the tested version) and restarts it.
+
+## 0.205.0
+
+- **Fixed: the web chat answered with a run of words like "chat_idprogresscompletionfinish".** The answer was read from the field that labels each event of the reply, because joined together those labels were longer than the short real answer. Such a field is never taken now, a chat's id ranks below ordinary words, and a capture saved earlier is read afresh - no need to capture again.
+- **Fixed: Chrome DevTools options typed on one line were ignored.** Under Arguments each line is one argument, so a line such as "--autoConnect --no-usage-statistics --no-performance-crux" reached the server as one unknown option: it started a Chrome of its own (reported as "The browser is already running ... Use --isolated") and usage reporting stayed on. The web chat now refuses such a server and says to put each option on its own line, and the MCP form warns about it for any server. An earlier release had accepted one line - wrongly.
+- "The browser is already running" now comes with what to do: give the server --autoConnect, on its own line, so every copy uses your own Chrome.
+- **Test both ways** also shows what the reply was made of (its fields and sizes, never its text), to send if an answer still looks wrong.
+
+## 0.204.0
+
+- **The web chat works when its backend is on another site** (for example an api. address). Once you approve that address, questions go to it **directly** from inside the chat page, signed in as you - only that address. If the direct request is refused, Light Code falls back to the **chat window**: it types the question into the chat and sends it, as you would, and reads the answer from the page's own reply from the address you approved (or off the screen, and says so). A conversation id in the address may change; nothing else may.
+- **Test both ways** (Settings → Agents → Web chat, beside Capture again) asks the web chat one short question directly and once through the chat window, and shows which works and how long each took.
+- Tested end to end against the real chrome-devtools-mcp and Chrome, with the backend on another site.
+
 ## 0.203.0
 
 - **Fixed: Capture in the web chat failed with "pageId: expected number"** on current chrome-devtools-mcp (1.x). The tab's id is now passed, an open web chat tab is recognised from Chrome's list (it was never found, so a new tab opened each time), and a reply that mentions the test phrase is read correctly. Tested end to end against the real chrome-devtools-mcp 1.13.0 and Chrome. A capture error now shows at once instead of the panel waiting.

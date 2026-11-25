@@ -69,11 +69,34 @@ export interface DebugSessionSnapshot {
   }
   /** Most recent console/stdout/stderr lines, oldest first, already capped by the host. */
   recentOutput: string[]
+  /**
+   * A variable opened up through the debugger (`expand`): its children, a few levels deep, as indented lines - a
+   * DataFrame's columns, an object's attributes, a list's items. Read through the debugger; nothing is run.
+   */
+  expanded?: { path: string; frame: number; lines: string[]; error?: string }
+}
+
+/** What `read` is asked for: a variable to open up, in which frame (0 = where it stopped). */
+export interface DebugReadRequest {
+  expand?: string | undefined
+  frame?: number | undefined
+  depth?: number | undefined
+}
+
+/** An expression evaluated in the paused frame (`evaluate_in_debug_session`). */
+export interface DebugEvaluation {
+  ok: boolean
+  /** The value as the debugger shows it - for a string, its text. */
+  result?: string
+  type?: string
+  /** Its children, when it has some, as indented lines. */
+  children?: string[]
+  error?: string
 }
 
 export interface DebugSessionToolOptions {
   /** Undefined return means no debug session is currently active. */
-  read: () => Promise<DebugSessionSnapshot | undefined>
+  read: (request?: DebugReadRequest) => Promise<DebugSessionSnapshot | undefined>
 }
 
 /** Formats a variable line, indented to its scope. */
@@ -113,6 +136,14 @@ export function renderDebugSnapshot(snapshot: DebugSessionSnapshot): string {
     lines.push('', 'Running — not currently paused. Set a breakpoint to inspect state at a point in time.')
   }
 
+  if (snapshot.expanded !== undefined) {
+    lines.push(
+      '',
+      `${snapshot.expanded.path} (frame ${String(snapshot.expanded.frame)}), opened through the debugger:`,
+      ...(snapshot.expanded.error !== undefined ? [`  ${snapshot.expanded.error}`] : snapshot.expanded.lines.length === 0 ? ['  (no children)'] : snapshot.expanded.lines),
+    )
+  }
+
   lines.push(
     '',
     snapshot.recentOutput.length === 0
@@ -124,7 +155,19 @@ export function renderDebugSnapshot(snapshot: DebugSessionSnapshot): string {
   return lines.join('\n')
 }
 
-export function createReadDebugSessionTool(options: DebugSessionToolOptions): Tool<Record<string, never>> {
+const readParams = z.object({
+  expand: z
+    .string()
+    .optional()
+    .describe(
+      'A variable to open up through the debugger, with a dotted path for something inside it: "df", "result.items", "self.config". ' +
+        'Shows its children a few levels deep - a DataFrame\'s columns, an object\'s attributes, a list\'s items. Runs nothing.',
+    ),
+  frame: z.number().int().min(0).max(20).optional().describe('Which call-stack frame the variable is in: 0 (default) is where it stopped.'),
+  depth: z.number().int().min(1).max(4).optional().describe('How many levels to open (default 2).'),
+})
+
+export function createReadDebugSessionTool(options: DebugSessionToolOptions): Tool<z.infer<typeof readParams>> {
   return {
     name: 'read_debug_session',
     group: 'read',
@@ -135,10 +178,12 @@ export function createReadDebugSessionTool(options: DebugSessionToolOptions): To
       'Node.js, Go, and others — not just one. Use this when investigating a crash, an ' +
       'exception, or unexpected runtime behaviour while the user has something paused in the ' +
       'debugger, instead of asking them to paste variable values by hand. Read-only: it cannot ' +
-      'step, continue, or set breakpoints. Returns a clear message if nothing is being debugged.',
-    parametersSchema: z.object({}),
-    async execute(): Promise<ToolResult> {
-      const snapshot = await options.read()
+      'step, continue, or set breakpoints. Returns a clear message if nothing is being debugged. ' +
+      'A variable shows only a summary (a DataFrame as its type and shape): pass `expand` with its name to open it up, ' +
+      'or use evaluate_in_debug_session for its data (df.head(50).to_string()).',
+    parametersSchema: readParams,
+    async execute(params): Promise<ToolResult> {
+      const snapshot = await options.read({ ...(params.expand !== undefined ? { expand: params.expand } : {}), ...(params.frame !== undefined ? { frame: params.frame } : {}), ...(params.depth !== undefined ? { depth: params.depth } : {}) })
       if (snapshot === undefined) {
         return {
           content:
@@ -147,6 +192,58 @@ export function createReadDebugSessionTool(options: DebugSessionToolOptions): To
         }
       }
       return { content: renderDebugSnapshot(snapshot) }
+    },
+  }
+}
+
+export interface DebugEvaluateToolOptions {
+  /** Undefined when nothing is paused in a debugger. */
+  evaluate: (request: { expression: string; frame?: number }) => Promise<DebugEvaluation | undefined>
+}
+
+const evaluateParams = z.object({
+  expression: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe(
+      'An expression in the paused program\'s language, evaluated where it stopped. For data, ask for text: pandas ' +
+        'df.head(50).to_string() or df.describe().to_string(); polars str(df.head(50)); numpy repr(arr[:20]); ' +
+        'an object vars(obj) or obj.__dict__. Prefer expressions with no side effects.',
+    ),
+  frame: z.number().int().min(0).max(20).optional().describe('Which call-stack frame: 0 (default) is where it stopped.'),
+})
+
+/**
+ * Evaluating an expression in a paused debug session (asked for: "provide way to read dataframe data too or complex
+ * python objects"). read_debug_session shows what the debugger summarises; a DataFrame's data needs code to turn it
+ * into text, and evaluating runs code in the user's program - so this is its own tool, `command` group, asking with
+ * the literal expression (invariant 8), and never available to a scheduled run.
+ */
+export function createEvaluateInDebugSessionTool(options: DebugEvaluateToolOptions): Tool<z.infer<typeof evaluateParams>> {
+  return {
+    name: 'evaluate_in_debug_session',
+    group: 'command',
+    description:
+      'Evaluates an expression in the paused VS Code debug session, in the frame where it stopped, and returns the value ' +
+      '- for reading a DataFrame\'s rows or a complex object\'s contents. Runs code in the user\'s program, so it asks ' +
+      'first. Use read_debug_session first to see the variables.',
+    parametersSchema: evaluateParams,
+    // As a command: the literal expression is what is approved, and "Always allow" covers exactly that expression.
+    preview: async (params) => ({ kind: 'command', command: params.expression, cwd: `the paused debug session, frame ${String(params.frame ?? 0)}` }),
+    async execute(params): Promise<ToolResult> {
+      const answer = await options.evaluate({ expression: params.expression, ...(params.frame !== undefined ? { frame: params.frame } : {}) })
+      if (answer === undefined) {
+        return { content: 'Nothing is paused in a debugger. Pause the program at a breakpoint and try again.', isError: true }
+      }
+      if (!answer.ok) return { content: `The debugger could not evaluate it: ${answer.error ?? 'no reason given'}`, isError: true }
+      return {
+        content: [
+          `${params.expression}${answer.type !== undefined ? ` (${answer.type})` : ''} =`,
+          answer.result ?? '',
+          ...(answer.children !== undefined && answer.children.length > 0 ? ['', 'Its contents:', ...answer.children] : []),
+        ].join('\n'),
+      }
     },
   }
 }

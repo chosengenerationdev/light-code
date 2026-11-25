@@ -27,7 +27,8 @@ describe('codebase instructions', () => {
     expect(bridge).toContain('codebaseInstructionsPath({ codebaseDir: services.codebaseDir, storageDir, workspaceRoot: projectRoot })')
     // Read every turn - started early with the rest of the turn's preparation, awaited where it is used.
     expect(bridge).toContain('const instructionsReady = early(readCodebaseInstructions(codebaseInstructionsFile))')
-    expect(bridge).toContain('const codebaseInstructions = renderCodebaseInstructions(await instructionsReady)')
+    // With the codebase's memory after them (memory/store.ts).
+    expect(bridge).toContain('const codebaseInstructions = [renderCodebaseInstructions(await instructionsReady), renderMemoryForAgent(memory, memoryLeft)]')
     expect(bridge).toMatch(/\n\s+codebaseInstructions,\n/)
   })
 })

@@ -6,6 +6,8 @@ import { Select } from '../Select.js'
 import { disabledWhen } from '../disabledWhen.js'
 import { badgeStyle, colors, labelStyle, monospaceFamily, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
 import { Panel } from './Panel.js'
+import { MarkdownView } from '../MarkdownView.js'
+import { SeatModelPicker } from './SeatModelPicker.js'
 
 /**
  * Settings → Project: the Auditor and the Anti Hallucinator (`observers/` in core).
@@ -15,16 +17,16 @@ import { Panel } from './Panel.js'
  */
 
 type Draft = {
-  auditor: { enabled: boolean; profileId: string; recordReasoning: boolean; notify: boolean; opensearch: boolean; prompt: string }
-  guard: { enabled: boolean; profileId: string; prompt: string }
+  auditor: { enabled: boolean; profileId: string; model: string; recordReasoning: boolean; notify: boolean; opensearch: boolean; prompt: string }
+  guard: { enabled: boolean; profileId: string; model: string; prompt: string }
 }
 
 function draftFrom(message: ObserversMessage): Draft {
   const a = message.config.auditor ?? {}
   const g = message.config.antiHallucination ?? {}
   return {
-    auditor: { enabled: a.enabled === true, profileId: a.profileId ?? '', recordReasoning: a.recordReasoning !== false, notify: a.notify !== false, opensearch: a.opensearch !== false, prompt: a.prompt ?? DEFAULT_AUDITOR_INSTRUCTIONS },
-    guard: { enabled: g.enabled === true, profileId: g.profileId ?? '', prompt: g.prompt ?? DEFAULT_GUARD_INSTRUCTIONS },
+    auditor: { enabled: a.enabled === true, profileId: a.profileId ?? '', model: a.model ?? '', recordReasoning: a.recordReasoning !== false, notify: a.notify !== false, opensearch: a.opensearch !== false, prompt: a.prompt ?? DEFAULT_AUDITOR_INSTRUCTIONS },
+    guard: { enabled: g.enabled === true, profileId: g.profileId ?? '', model: g.model ?? '', prompt: g.prompt ?? DEFAULT_GUARD_INSTRUCTIONS },
   }
 }
 
@@ -37,6 +39,7 @@ function toConfig(draft: Draft, stored: ObserversMessage['config']): unknown {
       ...stored.auditor,
       enabled: a.enabled,
       ...(a.profileId !== '' ? { profileId: a.profileId } : { profileId: undefined }),
+      model: a.profileId !== '' && a.model !== '' ? a.model : undefined,
       recordReasoning: a.recordReasoning,
       notify: a.notify,
       opensearch: a.opensearch,
@@ -44,8 +47,12 @@ function toConfig(draft: Draft, stored: ObserversMessage['config']): unknown {
       prompt: a.prompt.trim() === DEFAULT_AUDITOR_INSTRUCTIONS || a.prompt.trim().length === 0 ? undefined : a.prompt,
     },
     antiHallucination: {
+      // Kept: fields this panel does not edit - the memory switch (Memory panel) above all.
+      ...stored.antiHallucination,
       enabled: g.enabled,
-      ...(g.profileId !== '' ? { profileId: g.profileId } : {}),
+      ...(g.profileId !== '' ? { profileId: g.profileId } : { profileId: undefined }),
+      model: g.profileId !== '' && g.model !== '' ? g.model : undefined,
+      prompt: undefined,
       ...(g.prompt.trim() !== DEFAULT_GUARD_INSTRUCTIONS && g.prompt.trim().length > 0 ? { prompt: g.prompt } : {}),
     },
   }
@@ -123,10 +130,16 @@ export function ObserversSection(props: { transport: Transport }): ReactElement 
   // The same, readable from the message handler, which is subscribed once.
   const savedRef = useRef('')
   const [error, setError] = useState<string | undefined>(undefined)
+  /** The roles-and-models report for this chat, once asked for. */
+  const [report, setReport] = useState<{ text: string; busy: boolean } | undefined>(undefined)
 
   useEffect(() => {
     const unsubscribe = transport.onMessage((raw) => {
       const incoming = raw as HostToUiMessage
+      if (incoming.type === 'auditRolesReport') {
+        setReport({ text: incoming.text, busy: false })
+        return
+      }
       if (incoming.type === 'observers') {
         setMessage(incoming)
         const fresh = draftFrom(incoming)
@@ -193,8 +206,15 @@ export function ObserversSection(props: { transport: Transport }): ReactElement 
           id="obs-audit-model"
           value={draft.auditor.profileId}
           options={profileOptions}
-          onChange={(v) => set((d) => ({ ...d, auditor: { ...d.auditor, profileId: v } }))}
+          onChange={(v) => set((d) => ({ ...d, auditor: { ...d.auditor, profileId: v, model: '' } }))}
           {...(noHelper !== undefined ? { title: noHelper } : {})}
+        />
+        <SeatModelPicker
+          transport={transport}
+          profileId={draft.auditor.profileId === '' ? undefined : draft.auditor.profileId}
+          value={draft.auditor.model === '' ? undefined : draft.auditor.model}
+          onChange={(model) => set((d) => ({ ...d, auditor: { ...d.auditor, model: model ?? '' } }))}
+          label="Its model"
         />
         <span style={hint}>Without a model it records and checks the rules below, and nothing reviews the record.</span>
         <PromptEditor id="obs-audit-prompt" value={draft.auditor.prompt} fallback={DEFAULT_AUDITOR_INSTRUCTIONS} onChange={(v) => set((d) => ({ ...d, auditor: { ...d.auditor, prompt: v } }))} />
@@ -229,6 +249,24 @@ export function ObserversSection(props: { transport: Transport }): ReactElement 
             </div>
           ) : null}
           <div style={{ color: colors.muted }}>Agents can read this record with the read_audit_log tool, for analysis later.</div>
+          <div>
+            <button
+              type="button"
+              style={secondaryButtonStyle()}
+              {...disabledWhen([report?.busy === true, 'Already reading the record.'], { enabledTitle: 'Which roles and models took part in this chat, from the record.' })}
+              onClick={() => {
+                setReport({ text: '', busy: true })
+                transport.post({ type: 'requestAuditRolesReport' } satisfies UiToHostMessage)
+              }}
+            >
+              Report on this chat
+            </button>
+          </div>
+          {report !== undefined && report.text.length > 0 ? (
+            <div data-testid="audit-roles-report" style={{ border: `1px solid ${colors.border}`, borderRadius: 6, padding: 8, marginTop: 6 }}>
+              <MarkdownView text={report.text} />
+            </div>
+          ) : null}
         </div>
         {message.state.alerts.length > 0 ? (
           <div style={{ marginTop: 8 }}>
@@ -257,7 +295,14 @@ export function ObserversSection(props: { transport: Transport }): ReactElement 
         <label htmlFor="obs-guard-model" style={labelStyle()}>
           Model that watches
         </label>
-        <Select id="obs-guard-model" value={draft.guard.profileId} options={profileOptions} onChange={(v) => set((d) => ({ ...d, guard: { ...d.guard, profileId: v } }))} />
+        <Select id="obs-guard-model" value={draft.guard.profileId} options={profileOptions} onChange={(v) => set((d) => ({ ...d, guard: { ...d.guard, profileId: v, model: '' } }))} />
+        <SeatModelPicker
+          transport={transport}
+          profileId={draft.guard.profileId === '' ? undefined : draft.guard.profileId}
+          value={draft.guard.model === '' ? undefined : draft.guard.model}
+          onChange={(model) => set((d) => ({ ...d, guard: { ...d.guard, model: model ?? '' } }))}
+          label="Its model"
+        />
         <PromptEditor id="obs-guard-prompt" value={draft.guard.prompt} fallback={DEFAULT_GUARD_INSTRUCTIONS} onChange={(v) => set((d) => ({ ...d, guard: { ...d.guard, prompt: v } }))} />
         <span style={hint}>A model at least as capable as the one doing the work catches more; a fast one keeps up better. Each step costs it one request.</span>
         <div style={{ fontSize: 12, marginTop: 6 }}>

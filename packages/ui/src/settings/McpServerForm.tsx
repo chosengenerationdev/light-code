@@ -457,6 +457,28 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
             pairs={form.headers}
             onChange={(headers) => patch({ headers })}
           />
+          <Field
+            id="lc-mcp-ca"
+            label="CA certificate (optional)"
+            value={form.caFile}
+            mono
+            placeholder="C:\certs\internal-root.pem - trusted for this server as well"
+            onChange={(caFile) => patch({ caFile })}
+          />
+          <span style={{ display: 'block', color: colors.muted, fontSize: 11, margin: '-6px 0 8px' }}>
+            The Windows certificate store and Settings → Network's certificate are already trusted; add a file here only for a
+            certificate neither has.
+          </span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginBottom: 4 }}>
+            <input type="checkbox" checked={form.skipVerify} onChange={(event) => patch({ skipVerify: event.target.checked })} />
+            Don't verify this server's certificate
+          </label>
+          {form.skipVerify && (
+            <span data-testid="mcp-skip-verify" style={{ display: 'block', color: colors.error, fontSize: 11, marginBottom: 10 }}>
+              Anything between you and this server can read and change the traffic, tokens included, and nothing will show it.
+              Use it only for an internal server whose certificate you cannot get; a CA file above is the proper fix.
+            </span>
+          )}
         </>
       )}
 
@@ -490,6 +512,12 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
               One per line — not a command line, so nothing is split on spaces and quoting is never needed. A path
               containing a space goes on its own line as-is.
             </span>
+            {form.args.some((line) => /^-\S*\s+-/.test(line.trim())) && (
+              <span data-testid="mcp-args-joined" style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+                A line holds several options ({form.args.find((line) => /^-\S*\s+-/.test(line.trim()))?.trim()}): they are passed as
+                separate arguments, as if each were on its own line. A line with quotes or a backslash is passed exactly as typed.
+              </span>
+            )}
           </div>
 
           <PathField

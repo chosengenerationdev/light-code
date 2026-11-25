@@ -4,7 +4,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { SecretStore } from '../platform/secrets.js'
-import { isStdioServer, type McpServerConfig } from './types.js'
+import { isStdioServer, stdioCommandLine, type McpServerConfig } from './types.js'
 
 const CLIENT_INFO = { name: 'light-code', version: '0.0.0' }
 
@@ -32,7 +32,17 @@ export interface InterpolationOptions {
   repositoryDefined?: boolean
   /** The environment `${env:NAME}` reads. Defaults to this process's. */
   env?: Record<string, string | undefined>
+  /**
+   * How an HTTP server is reached: Light Code's own client, with the certificate settings (Settings -> Network and the
+   * server's own `tls`) and the Windows certificate store. Absent, the SDK's global fetch - which in VS Code is VS Code's
+   * (trusting the Windows store) and in Fire Code is plain Node's (trusting neither): reported as "unable to verify the
+   * first certificate" in Fire Code for a server that worked in VS Code.
+   */
+  fetch?: McpFetch
 }
+
+/** The fetch the MCP SDK's HTTP transports take. */
+export type McpFetch = (url: string | URL, init?: RequestInit) => Promise<Response>
 
 export async function interpolateSecrets(
   values: Record<string, string> | undefined,
@@ -81,9 +91,11 @@ async function buildTransport(
 ): Promise<Transport> {
   if (isStdioServer(config)) {
     const configuredEnv = await interpolateSecrets(config.env, secrets, options)
+    // Several options typed on one line become separate arguments (`stdioCommandLine`), as the person meant.
+    const line = stdioCommandLine(config)
     return new StdioClientTransport({
-      command: config.command,
-      ...(config.args !== undefined ? { args: config.args } : {}),
+      command: line.command,
+      ...(line.args.length > 0 ? { args: line.args } : {}),
       ...(config.cwd !== undefined ? { cwd: config.cwd } : {}),
       // Passing `env` *replaces* the SDK's default rather than merging, so a server given
       // any env var at all would otherwise lose PATH and fail to spawn. The SDK's default
@@ -96,7 +108,7 @@ async function buildTransport(
   }
 
   const headers = await interpolateSecrets(config.headers, secrets, options)
-  return httpTransport(config.url, headers, httpKindOf(config))
+  return httpTransport(config.url, headers, httpKindOf(config), options.fetch)
 }
 
 /**
@@ -126,8 +138,12 @@ function httpTransport(
   url: string,
   headers: Record<string, string>,
   kind: 'sse' | 'streamable-http',
+  fetch?: McpFetch,
 ): Transport {
-  const options = Object.keys(headers).length > 0 ? { requestInit: { headers } } : {}
+  const options = {
+    ...(Object.keys(headers).length > 0 ? { requestInit: { headers } } : {}),
+    ...(fetch !== undefined ? { fetch } : {}),
+  }
   const transport =
     kind === 'sse'
       ? new SSEClientTransport(new URL(url), options)
@@ -251,7 +267,7 @@ export class McpConnection {
     if (isStdioServer(config) || config.type !== undefined) return undefined
     this.onLog(`Streamable HTTP failed (${describeError(error)}) — retrying as SSE`)
     const headers = await interpolateSecrets(config.headers, this.secrets, this.interpolation)
-    return httpTransport(config.url, headers, 'sse')
+    return httpTransport(config.url, headers, 'sse', this.interpolation.fetch)
   }
 
   private attachStderr(transport: StdioClientTransport): void {

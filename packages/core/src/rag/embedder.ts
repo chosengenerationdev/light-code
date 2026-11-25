@@ -79,10 +79,32 @@ export class Embedder {
 
     for (let start = 0; start < texts.length; start += this.batchSize) {
       const batch = texts.slice(start, start + this.batchSize)
-      vectors.push(...(await this.embedOneBatch(batch, signal)))
+      vectors.push(...(await this.withRetries(() => this.embedOneBatch(batch, signal), signal)))
     }
     return vectors
   }
+
+  /**
+   * A failed request is asked again, twice, after a short wait (reported: agents stopped on "invalid request ... model
+   * not allowed" from the embedding gateway, which came and went). Every failure is retried except one the signal
+   * cancelled: a gateway's 400 that is really a passing fault looks exactly like a permanent one, and two more tries
+   * cost seconds where giving up cost the agent its task. `retryDelaysMs` is for tests.
+   */
+  private async withRetries<T>(attempt: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const delays = this.retryDelaysMs
+    for (let tried = 0; ; tried += 1) {
+      try {
+        return await attempt()
+      } catch (error) {
+        const wait = delays[tried]
+        if (wait === undefined || signal?.aborted === true) throw error
+        await new Promise((resolve) => setTimeout(resolve, wait))
+      }
+    }
+  }
+
+  /** Waits before each retry of a failed request. */
+  retryDelaysMs: readonly number[] = [1_000, 3_000]
 
   private async embedOneBatch(batch: readonly string[], signal?: AbortSignal): Promise<number[][]> {
     const url = `${this.config.profile.baseUrl.replace(/\/+$/, '')}/embeddings`
@@ -165,4 +187,16 @@ export class Embedder {
       return entry.embedding
     })
   }
+}
+
+/**
+ * A search tool's failure, with what the agent should do about it. Reported: agents stopped on an embedding gateway's
+ * passing error ("invalid request ... model not allowed"), reading it as the end of the task. The search is a help, not
+ * the task: say so, and name the way round it.
+ */
+export function searchFailure(message: string, instead: string): string {
+  return (
+    `${message}\n\nThis is the search service failing (it is often temporary), not a problem with the task. Do not stop ` +
+    `because of it: ${instead} You may try this search again later.`
+  )
 }

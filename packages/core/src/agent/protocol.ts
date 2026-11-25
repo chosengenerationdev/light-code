@@ -51,8 +51,32 @@ import type { ChartSpec } from '../charts/types.js'
 import type { DiagramSpec } from '../diagrams/types.js'
 
 /** Settings → Agents → Decision model (config `decisionModel`). */
+/** Settings → Search → Reranker (config `reranker`). */
+export interface RerankerSettings {
+  profileId?: string | undefined
+  model?: string | undefined
+  endpoint?: string | undefined
+  minScore?: number | undefined
+  candidates?: number | undefined
+  docs?: boolean | undefined
+  teamSkills?: boolean | undefined
+  codebase?: boolean | undefined
+  picks?: boolean | undefined
+}
+
+/** What Test reranker found: the sample texts in the order the reranker put them, with scores. */
+export interface RerankerTestResult {
+  ok: boolean
+  query: string
+  order: { text: string; score: number; expectedFirst: boolean }[]
+  endpoint?: string
+  error?: string
+  ms: number
+}
+
 export interface DecisionModelSettings {
   profileId?: string | undefined
+  model?: string | undefined
   endpoint?: string | undefined
   routing?: boolean | undefined
   routeThreshold?: number | undefined
@@ -234,6 +258,8 @@ export interface AgentRoleState {
   /** Absent when nobody is assigned, which is how a role is switched off. */
   kind?: 'cli' | 'profile'
   profileId?: string
+  /** The model from that provider for this role, when not the profile's own. */
+  model?: string
   /** Who answers, for display. */
   label: string
   available: boolean
@@ -831,6 +857,22 @@ export type UiToHostMessage =
   /** Settings → Agents → Decision model: what is set, and the profiles to pick from. */
   | { type: 'requestDecisionModel' }
   | { type: 'saveDecisionModel'; settings: DecisionModelSettings }
+  | { type: 'requestReranker' }
+  /** Settings -> Project -> Memory: the codebase's remembered guidance (memory/store.ts). */
+  | { type: 'requestCodebaseMemory' }
+  /** The models a saved profile's provider offers, for a seat's model picker (providers/seat.ts). */
+  | { type: 'requestProfileModels'; profileId: string }
+  /** Settings -> Appearance -> Suggestions while typing: which model suggests, and why the last one did not appear. */
+  | { type: 'requestCompletionSettings' }
+  | { type: 'setCompletionProfile'; profileId?: string; model?: string }
+  /** The Auditor's report on which roles and models took part in this chat. */
+  | { type: 'requestAuditRolesReport' }
+  | { type: 'addCodebaseMemory'; text: string }
+  | { type: 'editCodebaseMemory'; id: string; text: string }
+  | { type: 'deleteCodebaseMemory'; id: string }
+  | { type: 'setCodebaseMemoryEnabled'; value: boolean }
+  | { type: 'saveReranker'; settings: RerankerSettings }
+  | { type: 'testReranker' }
   /** Two sample questions to the decision model, answered by `decisionModelTest`. */
   | { type: 'testDecisionModel' }
   /** This chat: the decision model picks the skill and tool for each request (saved with the chat, carried on). */
@@ -847,6 +889,12 @@ export type UiToHostMessage =
   | { type: 'cancelWebChatCapture' }
   | { type: 'setWebChatModel'; model?: string }
   | { type: 'clearWebChat' }
+  /** Adds what the web chat needs to that Chrome DevTools server's entry (Settings → MCP) and restarts it. */
+  | { type: 'fixWebChatServer'; server: string }
+  /** Which Chrome that server uses: the person's own (--autoConnect) or one it starts. */
+  | { type: 'setWebChatChrome'; server: string; mode: 'own' | 'started' }
+  /** Asks the web chat one fixed question both ways - direct to the approved address, and through the chat window. */
+  | { type: 'testWebChat' }
   /** The page asks what the chat is still getting ready, when it loads. */
   | { type: 'requestStartupProgress' }
   | { type: 'setConnectionRetry'; stallSeconds: number; retries: number }
@@ -1390,7 +1438,7 @@ export type UiToHostMessage =
       type: 'setAgentRole'
       role: string
       /** Absent unassigns the role, which is how a specialist is switched off. */
-      assignment?: { kind: 'cli' | 'profile'; profileId?: string }
+      assignment?: { kind: 'cli' | 'profile'; profileId?: string; model?: string }
     }
   | {
       type: 'setAgentPrompt'
@@ -1495,6 +1543,19 @@ export type UiToHostMessage =
    * to find it twice — and `sections` is what they ticked.
    */
   | { type: 'importConfig'; path?: string; sections?: string[] }
+
+/** One way of asking the web chat, as the Test button tried it. */
+export interface WebChatTestResult {
+  way: 'direct' | 'window'
+  ok: boolean
+  /** The answer (start of it), or why it failed. */
+  text: string
+  ms: number
+  /** For the chat window: whether the answer came from the backend's reply or off the screen. */
+  from?: 'reply' | 'screen'
+  /** What the reply was made of - field names and sizes, never its text - to diagnose an answer read from the wrong place. */
+  shape?: string
+}
 
 export type HostToUiMessage =
   | { type: 'artifacts'; list?: ArtifactList; error?: string; opens: { open: boolean; reveal: boolean } }
@@ -1979,25 +2040,46 @@ export type HostToUiMessage =
   /** The suggestion for `requestCompletion` `id`; empty when there is none. */
   | { type: 'completion'; id: string; text: string }
   | { type: 'decisionModel'; settings: DecisionModelSettings; profiles: { id: string; label: string }[]; label?: string; error?: string }
+  | { type: 'reranker'; settings: RerankerSettings; profiles: { id: string; label: string }[]; label?: string; error?: string; saved?: boolean }
+  | { type: 'rerankerTest'; result: RerankerTestResult }
+  | { type: 'auditRolesReport'; text: string }
+  | { type: 'profileModels'; profileId: string; models: string[]; model?: string; warning?: string }
+  | { type: 'completionSettings'; profileId?: string; model?: string; chatProfileId?: string; chatModel?: string; profiles: { id: string; label: string; model: string }[]; lastProblem?: string; lastOk?: { model: string; ms: number } }
+  | {
+      type: 'codebaseMemory'
+      available: boolean
+      enabled: boolean
+      /** Whether the Anti Hallucinator is on - the one that adds to the memory. */
+      guardOn: boolean
+      entries: { id: string; text: string; from?: string; by: 'anti-hallucinator' | 'you'; at: number; uses: number; lastUsed?: number }[]
+      message?: string
+    }
   | { type: 'decisionModelTest'; results: DecisionTestResult[] }
   | { type: 'chatSkillToolPicks'; value: 'off' | 'skills' | 'tools' | 'both' }
   | {
       type: 'webChat'
       /** False on a shared server: there is no personal folder to keep it in. */
       available: boolean
-      setup?: { pageUrl: string; backend: string; method: string; model?: string; modelOverride?: string; fromPage: string[]; capturedAt: string }
+      /** `method`: the HTTP method; `via`: replay (Light Code sends the request) or window (typed into the chat window). */
+      setup?: { pageUrl: string; backend: string; via: 'replay' | 'window'; method: string; model?: string; modelOverride?: string; fromPage: string[]; capturedAt: string }
       /** Every connected Chrome DevTools MCP server with what stops it being used for the web chat, and the one chosen. */
       /** `registry`: where an npx-started server downloads from (npm's own setting), shown to the user. */
-      chrome: { servers: { name: string; problems: string[]; registry?: string }[]; chosen?: string }
+      chrome: { servers: { name: string; problems: string[]; fixable?: boolean; mode?: 'own' | 'started' | 'address'; registry?: string }[]; chosen?: string }
       /** Why the web chat's address is not inside the network; empty when it is. */
       hostProblem?: string
       message?: string
     }
   | {
+      type: 'webChatTest'
+      /** Absent while running; one entry per way, in order: direct, then chat window. */
+      results?: WebChatTestResult[]
+      running?: 'direct' | 'window'
+    }
+  | {
       type: 'webChatCapture'
       phase: 'waiting' | 'found' | 'failed'
       phrase?: string
-      candidates?: { backend: string; method: string; model?: string; answerPreview: string; fromPage: string[] }[]
+      candidates?: { backend: string; method: string; model?: string; answerPreview: string; fromPage: string[]; window: boolean }[]
       refused?: string[]
       message?: string
     }

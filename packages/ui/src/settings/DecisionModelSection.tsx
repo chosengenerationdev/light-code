@@ -6,6 +6,7 @@ import { Select } from '../Select.js'
 import { colors, labelStyle, monospaceFamily, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { disabledWhen } from '../disabledWhen.js'
 import { Panel } from './Panel.js'
+import { SeatModelPicker } from './SeatModelPicker.js'
 
 /**
  * Settings → Agents → Decision model. Self-contained, talking to the host through the transport itself (the
@@ -74,9 +75,10 @@ export function DecisionModelSection(props: { transport: Transport }): ReactElem
         <Select
           value={current.profileId ?? ''}
           options={[{ value: '', label: 'None' }, ...profiles.map((profile) => ({ value: profile.id, label: profile.label }))]}
-          onChange={(value) => save(value === '' ? {} : { ...current, profileId: value })}
+          onChange={(value) => save(value === '' ? {} : { ...current, profileId: value, model: undefined })}
           ariaLabel="Decision model profile"
         />
+        {chosen && <SeatModelPicker transport={transport} profileId={current.profileId} value={current.model} onChange={(model) => save({ ...current, model })} />}
         {profiles.length === 0 && (
           <p style={{ color: colors.muted, fontSize: 11, margin: '6px 0 0' }}>Add the decision model under Providers (OpenAI-compatible) first.</p>
         )}

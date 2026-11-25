@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { Logger } from '../logging/logger.js'
 import type { SecretStore } from '../platform/secrets.js'
 import type { Tool, ToolPreview, ToolResult } from '../tools/types.js'
-import { McpConnection, type McpToolDescriptor, type RawToolResult } from './client.js'
+import { McpConnection, type McpFetch, type McpToolDescriptor, type RawToolResult } from './client.js'
 import { denyCheck } from './deny.js'
 import type { McpToolCache, McpToolCacheEntry } from './toolCache.js'
 import {
@@ -132,6 +132,8 @@ export class McpRegistry {
     private readonly isRepositoryServer: (name: string) => Promise<boolean> = async () => false,
     /** What servers offered when any session of this codebase last connected - see `toolCache.ts`. */
     private readonly toolCache: McpToolCache | undefined = undefined,
+    /** How an HTTP server is reached (`InterpolationOptions.fetch`); asked on every connect, so a changed setting applies. */
+    private readonly fetchFor: ((name: string, config: McpServerConfig) => Promise<McpFetch | undefined>) | undefined = undefined,
   ) {}
 
   /** Connections being opened, so two callers asking at once share one start rather than spawning two servers. */
@@ -355,7 +357,10 @@ export class McpRegistry {
       },
       // Forwarded: without it a global timeout above the SDK's 60s default never applied to MCP.
       this.defaultTimeout,
-      { repositoryDefined: await this.isRepositoryServer(name) },
+      await (async () => {
+        const fetch = isStdioServer(config) ? undefined : await this.fetchFor?.(name, config)
+        return { repositoryDefined: await this.isRepositoryServer(name), ...(fetch !== undefined ? { fetch } : {}) }
+      })(),
     )
 
     const startedAt = Date.now()
