@@ -107,9 +107,27 @@ configure a provider.
   each in its own process and context, so the main chat stays lean.
 - **Every seat takes a provider and then a model from it**: one provider profile serves every
   role, the decision model, the reranker and the reviewers, each on the model you pick.
-- **Strategies**: draw how the specialists work together — loops between two roles with a round
-  limit or a stop condition, boxes whose steps run in parallel, and data contracts on each
-  connector, checked automatically.
+- **Strategies**: draw how the specialists work together, in the Strategy window (any mode, once a
+  specialist is assigned), and the flow is held to the drawing:
+  - **The plan follows it.** The main agent proposes a plan that carries out every step, in order, and
+    you approve it. Each step can carry its own instructions (with `@` files) for that specialist.
+  - **Loops are enforced, not suggested.** A back-and-forth connector (tester ↔ programmer) runs until
+    its condition is met or its round limit is reached; one round past the limit is refused before any
+    model is asked. The judging role says MET or NOT MET - or the decision model decides, when one is
+    set up. A new topic in the same chat starts the loops again.
+  - **Boxes**: steps in a *parallel* box are consulted at once, each specialist in its own process;
+    steps in a *together* box are all done before the flow moves on. A box can be connected like a step.
+  - **Decision steps**: after a step, the decision model chooses which connector to follow next.
+  - **Contracts**: a connector can say what must be handed over, item by item. Each hand-over is
+    checked; a missing item is asked for again (twice at most), and the main agent is told what is
+    still missing. The agent can propose contracts for connectors that have none - you approve them.
+  - **Hand-overs go specialist to specialist**: each gets the previous step's full answer directly,
+    while the main chat receives only a short summary, so its context stays lean.
+  - **You can see where it is**: the window lights up the step working now, each loop's round and
+    verdict, and every exchange - what was asked, answered, refused or asked again - which the agent
+    can also read back with `strategy_history` to explain why it went back and forth.
+  - Strategies are saved to a library and chosen per chat; a chat keeps its strategy through reloads,
+    a handoff, and a new chat started from it.
 - **A decision model** (such as D3 from vLLM Semantic Router) can route each message to the right
   specialist, judge loop conditions, choose a strategy's next step, and pick the skill and tool a
   request needs — with calibrated probabilities, never granting anything.
