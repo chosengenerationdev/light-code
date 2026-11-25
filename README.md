@@ -6,6 +6,10 @@ configurable LLM providers, MCP integration — and deliberately nothing else.
 **No telemetry, ever. No default endpoints.** A fresh install contacts nothing until you
 configure a provider.
 
+**Draw how your AI specialists work together, and Light Code holds them to it** — loop limits,
+checked hand-overs, parallel steps and decision points, enforced by Light Code rather than left to
+the model, visible while it runs and recorded by the Auditor. See [Strategies](#a-team-of-specialists).
+
 ---
 
 ## What it does
